@@ -1,0 +1,247 @@
+import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import { getConfig, search, generateAnswer, askDocs, sendFeedback } from "./api";
+import type { AppConfig, Citation, FacetValue, Persona, SearchResponse, SearchResult } from "./types";
+
+interface AnswerState {
+  loading: boolean;
+  requested: boolean;
+  summary: string;
+  citations: Citation[];
+}
+const EMPTY_ANSWER: AnswerState = { loading: false, requested: false, summary: "", citations: [] };
+import { HeroLanding } from "./components/HeroLanding";
+import { Header } from "./components/Header";
+import { NoticeBanner } from "./components/NoticeBanner";
+import { FilterBar } from "./components/FilterBar";
+import { AnswerCard } from "./components/AnswerCard";
+import { ResultCard } from "./components/ResultCard";
+import { FeedbackTab } from "./components/FeedbackTab";
+import { HowItWorks } from "./components/HowItWorks";
+
+export default function App() {
+  const [cfg, setCfg] = useState<AppConfig | null>(null);
+  const [persona, setPersona] = useState<Persona | undefined>();
+  const [view, setView] = useState<"landing" | "results" | "how">("landing");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [available, setAvailable] = useState<Record<string, FacetValue[]>>({});
+  const [resp, setResp] = useState<SearchResponse | null>(null);
+  const [searchId, setSearchId] = useState<string | undefined>();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  // AI answer is opt-in (latency/cost): persisted toggle + on-demand button.
+  const [aiOn, setAiOn] = useState<boolean>(() => localStorage.getItem("aiAnswer") === "on");
+  const [model, setModel] = useState<string | undefined>(() => localStorage.getItem("answerModel") || undefined);
+  const [ans, setAns] = useState<AnswerState>(EMPTY_ANSWER);
+
+  useEffect(() => {
+    getConfig()
+      .then((c) => {
+        setCfg(c);
+        setPersona(c.personas[0]);
+        setModel((m) => m || c.models?.find((x) => x.default)?.id || c.models?.[0]?.id);
+      })
+      .catch(() => setError("Could not load app config (is the backend running?)"));
+  }, []);
+
+  async function generate(q: string, facets: Record<string, string[]>, sid = searchId) {
+    setAns({ ...EMPTY_ANSWER, loading: true, requested: true });
+    try {
+      const a = await generateAnswer(q, facets, persona?.email, { model, searchId: sid });
+      setAns({ loading: false, requested: true, summary: a.summary, citations: a.citations });
+    } catch {
+      setAns({ loading: false, requested: true, summary: "", citations: [] });
+    }
+  }
+
+  async function run(q: string, facets: Record<string, string[]>) {
+    setLoading(true);
+    setError("");
+    setAns(EMPTY_ANSWER); // new result set → clear any prior answer
+    try {
+      const r = await search(q, facets, persona?.email);
+      setResp(r);
+      setSearchId(r.searchId);
+      setAvailable(r.availableFilters || {});
+      if (aiOn) generate(q, facets, r.searchId); // auto-generate only when the toggle is on
+    } catch (e: any) {
+      setError(e?.message || "search failed");
+      setResp(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleAi() {
+    const next = !aiOn;
+    setAiOn(next);
+    localStorage.setItem("aiAnswer", next ? "on" : "off");
+    // turning it on while viewing results with no answer yet → generate now
+    if (next && view === "results" && query && !ans.summary && !ans.loading) {
+      generate(query, selected);
+    }
+  }
+
+  function startSearch(q: string) {
+    setQuery(q);
+    setSelected({});
+    setView("results");
+    setResp(null);
+    run(q, {});
+  }
+
+  function goHome() {
+    setView("landing");
+    setQuery("");
+    setSelected({});
+    setResp(null);
+    setError("");
+  }
+
+  function toggleFilter(field: string, value: string) {
+    setSelected((prev) => {
+      const cur = prev[field] || [];
+      const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
+      const out = { ...prev, [field]: next };
+      if (!next.length) delete out[field];
+      run(query, out);
+      return out;
+    });
+  }
+
+  function clearFilters() {
+    setSelected({});
+    run(query, {});
+  }
+
+  // re-run when persona changes mid-session (results view only)
+  useEffect(() => {
+    if (view === "results" && query) run(query, selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona?.email]);
+
+  if (!cfg) {
+    return (
+      <div className="grid min-h-screen place-items-center text-amgen-muted">
+        {error || "Loading…"}
+      </div>
+    );
+  }
+
+  if (view === "how") {
+    return <HowItWorks onHome={goHome} />;
+  }
+
+  if (view === "landing") {
+    return (
+      <HeroLanding
+        personas={cfg.personas}
+        current={persona}
+        onPersona={setPersona}
+        onSearch={startSearch}
+        onHome={goHome}
+        onHow={() => setView("how")}
+      />
+    );
+  }
+
+  const results = resp?.results ?? [];
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-white">
+      {/* faint brand mesh, matching the hero */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-32 -top-24 h-80 w-80 rounded-full bg-amgen-blue/10 blur-3xl" />
+        <div className="absolute right-0 top-40 h-80 w-80 rounded-full bg-amgen-teal/10 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-amgen-green/10 blur-3xl" />
+      </div>
+      <div className="relative">
+      <Header
+        query={query}
+        onSearch={startSearch}
+        personas={cfg.personas}
+        current={persona}
+        onPersona={setPersona}
+        onHome={goHome}
+        onHow={() => setView("how")}
+        aiOn={aiOn}
+        onToggleAi={toggleAi}
+        models={cfg.models || []}
+        model={model}
+        onModel={(id) => {
+          setModel(id);
+          localStorage.setItem("answerModel", id);
+        }}
+      />
+      <NoticeBanner />
+      <FeedbackTab />
+
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-6 md:grid-cols-[260px_1fr]">
+        {/* filters */}
+        <aside className="md:sticky md:top-20 md:self-start">
+          <FilterBar
+            available={available}
+            selected={selected}
+            onToggle={toggleFilter}
+            onClear={clearFilters}
+          />
+        </aside>
+
+        {/* results column */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-amgen-muted">
+              {loading ? "Searching…" : `Top results for “${query}”`}
+              {!loading && (
+                <span className="ml-2 font-normal text-amgen-muted/70">
+                  {results.length} shown · as {persona?.display_name}
+                </span>
+              )}
+            </h2>
+            <button className="inline-flex items-center gap-1 rounded-lg border border-amgen-line bg-white px-2.5 py-1 text-xs text-amgen-muted hover:border-amgen-blue">
+              <Download size={13} /> Export
+            </button>
+          </div>
+
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          {!loading && results.length > 0 && (
+            <AnswerCard
+              loading={ans.loading}
+              summary={ans.summary}
+              citations={ans.citations}
+              requested={ans.requested}
+              onGenerate={() => generate(query, selected)}
+              onAsk={(q, opts) => askDocs(query, selected, q, persona?.email, { model, useSearch: opts.useSearch, searchId })}
+            />
+          )}
+
+          {!loading && results.length === 0 && !error && (
+            <div className="rounded-2xl border border-amgen-line bg-white p-6 text-center text-sm text-amgen-muted">
+              No documents you have access to match this query and filter set.
+            </div>
+          )}
+
+          {results.map((d) => (
+            <ResultCard
+              key={d.documentId}
+              doc={d}
+              userEmail={persona?.email}
+              aiOn={aiOn}
+              model={model}
+              searchId={searchId}
+              onVote={(doc: SearchResult, vote) =>
+                sendFeedback(query, doc.documentId, doc.title, vote, persona?.email, searchId)
+              }
+            />
+          ))}
+        </section>
+      </main>
+      </div>
+    </div>
+  );
+}

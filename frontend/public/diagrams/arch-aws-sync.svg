@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 560" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.8;fill:none}
+    </style>
+  </defs>
+  <rect width="1040" height="560" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Syncing with AWS DynamoDB (future)</text>
+  <text x="40" y="70" font-size="13" class="m">The Firestore catalog is the contract boundary. GCP never holds AWS credentials; only the upstream replicator differs.</text>
+
+  <!-- AWS zone -->
+  <rect x="40" y="100" width="430" height="360" rx="14" fill="#ffffff" stroke="#E5EAF1" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="60" y="128" font-size="14" class="m h">AWS</text>
+
+  <rect x="80" y="150" width="350" height="64" rx="12" fill="#222222"/>
+  <text x="100" y="180" font-size="15" class="w h">DynamoDB — system of record</text>
+  <text x="100" y="200" font-size="12" class="w">item: id · metadata · groups · version · (REMOVE)</text>
+  <line x1="255" y1="214" x2="255" y2="244" class="flow" marker-end="url(#arr3)"/>
+
+  <rect x="80" y="246" width="350" height="56" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="100" y="270" font-size="13" class="t h">DynamoDB Streams</text>
+  <text x="100" y="289" font-size="12" class="m">item-level change events (new + old image)</text>
+  <line x1="255" y1="302" x2="255" y2="332" class="flow" marker-end="url(#arr3)"/>
+
+  <rect x="80" y="334" width="350" height="70" rx="12" fill="#0056B3"/>
+  <text x="100" y="362" font-size="13" class="w h">AWS Lambda (Firebase Admin SDK)</text>
+  <text x="100" y="382" font-size="12" class="w">maps item → catalog record; INSERT/MODIFY = set,</text>
+  <text x="100" y="397" font-size="12" class="w">REMOVE = deleted:true</text>
+
+  <text x="100" y="436" font-size="12" class="m">Alt (GCP-side): boto3 poller =</text>
+  <text x="100" y="452" font-size="12" class="m">replicate_catalog.py (CATALOG_SOURCE=dynamo)</text>
+
+  <!-- boundary arrow -->
+  <line x1="430" y1="369" x2="556" y2="369" class="flow" marker-end="url(#arr3)"/>
+  <text x="493" y="360" font-size="11" text-anchor="middle" class="m">writes</text>
+
+  <!-- GCP zone -->
+  <rect x="556" y="100" width="444" height="360" rx="14" fill="#ffffff" stroke="#0063C3" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="576" y="128" font-size="14" class="t h" fill="#0063C3">Google Cloud (no AWS creds)</text>
+
+  <rect x="588" y="338" width="384" height="64" rx="12" fill="#15909C"/>
+  <text x="608" y="366" font-size="15" class="w h">Firestore · catalog (contract)</text>
+  <text x="608" y="386" font-size="12" class="w">same schema, whoever writes it</text>
+
+  <line x1="780" y1="338" x2="780" y2="300" class="flow" marker-end="url(#arr3)"/>
+  <rect x="588" y="232" width="384" height="64" rx="12" fill="#0056B3"/>
+  <text x="608" y="260" font-size="15" class="w h">reconcile.py — Cloud Run Job</text>
+  <text x="608" y="280" font-size="12" class="w">Cloud Scheduler · loads only the delta</text>
+
+  <line x1="780" y1="232" x2="780" y2="194" class="flow" marker-end="url(#arr3)"/>
+  <rect x="588" y="150" width="384" height="44" rx="12" fill="#0063C3"/>
+  <text x="780" y="178" font-size="14" text-anchor="middle" class="w h">Vertex AI Search index</text>
+
+  <!-- footer -->
+  <text x="40" y="498" font-size="12.5" class="m h">Two interchangeable upstreams, one contract:</text>
+  <text x="40" y="518" font-size="12.5" class="m">A) DynamoDB Streams → Lambda writes the catalog (CATALOG_SOURCE=firestore on our side).  B) GCP-side boto3 poller (CATALOG_SOURCE=dynamo).</text>
+  <text x="40" y="537" font-size="12.5" class="m">Either way the reconcile job only ever reads the Firestore catalog — so the search app + ingest never depend on AWS.</text>
+</svg>

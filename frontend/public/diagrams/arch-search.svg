@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 560" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222} .m{fill:#747474} .w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5;rx:12}
+      .num{fill:#0063C3;font-weight:700}
+      .h{font-weight:700}
+      .flow{stroke:#747474;stroke-width:1.6;fill:none}
+    </style>
+  </defs>
+
+  <rect width="1040" height="560" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Core search — ACL-safe, query-time</text>
+  <text x="40" y="70" font-size="13" class="m">Browser → IAP → Cloud Run (FastAPI · app service account, read-only). Same query, different results per user.</text>
+
+  <!-- top lane: browser -> IAP -> app -->
+  <g font-size="13">
+    <rect x="40" y="96" width="150" height="46" rx="10" class="card"/>
+    <text x="115" y="124" text-anchor="middle" class="t h">Browser (SPA)</text>
+    <line x1="190" y1="119" x2="232" y2="119" class="flow" marker-end="url(#arr)"/>
+    <rect x="234" y="96" width="120" height="46" rx="10" fill="#0063C3"/>
+    <text x="294" y="124" text-anchor="middle" class="w h">IAP</text>
+    <line x1="354" y1="119" x2="396" y2="119" class="flow" marker-end="url(#arr)"/>
+    <rect x="398" y="96" width="300" height="46" rx="10" fill="#0056B3"/>
+    <text x="548" y="124" text-anchor="middle" class="w h">Cloud Run · FastAPI (read-only SA)</text>
+  </g>
+
+  <!-- numbered pipeline -->
+  <g font-size="12.5">
+    <!-- step template positions -->
+    <!-- 1 -->
+    <rect x="40" y="180" width="150" height="92" rx="12" class="card"/>
+    <text x="56" y="205" font-size="15" class="num">1</text>
+    <text x="56" y="228" class="t h">Identity</text>
+    <text x="56" y="247" class="m">IAP header /</text>
+    <text x="56" y="262" class="m">demo persona</text>
+    <line x1="190" y1="226" x2="216" y2="226" class="flow" marker-end="url(#arr)"/>
+    <!-- 2 -->
+    <rect x="218" y="180" width="158" height="92" rx="12" class="card"/>
+    <text x="234" y="205" font-size="15" class="num">2</text>
+    <text x="234" y="228" class="t h">Resolve groups</text>
+    <text x="234" y="247" class="m">Firestore</text>
+    <text x="234" y="262" class="m">group_users (live)</text>
+    <line x1="376" y1="226" x2="402" y2="226" class="flow" marker-end="url(#arr)"/>
+    <!-- 3 -->
+    <rect x="404" y="180" width="178" height="92" rx="12" class="card"/>
+    <text x="420" y="205" font-size="15" class="num">3</text>
+    <text x="420" y="228" class="t h">VAIS retrieve</text>
+    <text x="420" y="247" class="m">acl_groups: ANY(...)</text>
+    <text x="420" y="262" class="m">+ semantic re-rank</text>
+    <line x1="582" y1="226" x2="608" y2="226" class="flow" marker-end="url(#arr)"/>
+    <!-- 4 -->
+    <rect x="610" y="180" width="178" height="92" rx="12" class="card"/>
+    <text x="626" y="205" font-size="15" class="num">4</text>
+    <text x="626" y="228" class="t h">Facets + re-verify</text>
+    <text x="626" y="247" class="m">cascading chips;</text>
+    <text x="626" y="262" class="m">page re-check (FS)</text>
+    <line x1="788" y1="226" x2="814" y2="226" class="flow" marker-end="url(#arr)"/>
+    <!-- 5 -->
+    <rect x="816" y="180" width="184" height="92" rx="12" class="card"/>
+    <text x="832" y="205" font-size="15" class="num">5</text>
+    <text x="832" y="228" class="t h">Opt-in AI answer</text>
+    <text x="832" y="247" class="m">answer / ask /</text>
+    <text x="832" y="262" class="m">per-doc Q&amp;A (Gemini)</text>
+  </g>
+
+  <!-- backing services -->
+  <text x="40" y="330" font-size="13" class="t h">Backing services</text>
+  <g font-size="12.5">
+    <rect x="40" y="344" width="180" height="52" rx="10" fill="#15909C"/>
+    <text x="130" y="368" text-anchor="middle" class="w h">Firestore</text>
+    <text x="130" y="385" text-anchor="middle" class="w">RBAC graph</text>
+
+    <rect x="232" y="344" width="190" height="52" rx="10" fill="#0063C3"/>
+    <text x="327" y="368" text-anchor="middle" class="w h">Vertex AI Search</text>
+    <text x="327" y="385" text-anchor="middle" class="w">index + acl_groups</text>
+
+    <rect x="434" y="344" width="170" height="52" rx="10" fill="#92BE43"/>
+    <text x="519" y="368" text-anchor="middle" class="w h">Gemini</text>
+    <text x="519" y="385" text-anchor="middle" class="w">grounded answers</text>
+
+    <rect x="616" y="344" width="190" height="52" rx="10" fill="#15909C"/>
+    <text x="711" y="368" text-anchor="middle" class="w h">Cloud Storage</text>
+    <text x="711" y="385" text-anchor="middle" class="w">signed-URL copies</text>
+
+    <rect x="818" y="344" width="182" height="52" rx="10" fill="#0056B3"/>
+    <text x="909" y="368" text-anchor="middle" class="w h">BigQuery</text>
+    <text x="909" y="385" text-anchor="middle" class="w">searches + ai_turns</text>
+  </g>
+
+  <!-- security footer -->
+  <rect x="40" y="430" width="960" height="92" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="458" font-size="14" class="t h">Security model</text>
+  <text x="60" y="480" font-size="12.5" class="m">• Results, facets and answers are limited to documents where acl_groups ∩ the user's live Firestore groups ≠ ∅ — enforced server-side in VAIS.</text>
+  <text x="60" y="499" font-size="12.5" class="m">• AI answers are generated ONLY over the ACL-trimmed set (re-derived server-side); a page-level Firestore re-check is the defense-in-depth net.</text>
+  <text x="60" y="518" font-size="12.5" class="m">• Membership changes are live (no re-index); every turn is logged to BigQuery with model, web-search flag, latency, and a search_id.</text>
+</svg>

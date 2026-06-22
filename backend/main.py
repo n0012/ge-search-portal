@@ -1,0 +1,292 @@
+"""FastAPI app: one process serves the API and the built React SPA.
+
+Query-time flow:
+  /api/search  1. resolve user (IAP header / demo persona)
+               2. user -> groups (Firestore group_users)
+               3. retrieve (over-fetch, no summary)
+               4. ACL-trim to the user's groups (post-retrieval, app-side)
+               5. tally facets + apply UI data filters  (NO LLM — fast/cheap)
+  /api/answer  same retrieve+trim, THEN generate over ONLY the trimmed docs (ACL-safe).
+               Opt-in: the UI calls it when the AI toggle is on or the user clicks
+               "Generate AI answer", so search itself never pays LLM latency/cost.
+  /api/doc/{id} ACL-checked redirect to a signed URL for the imported GCS copy.
+
+Access control (RBAC) is enforced here and is NOT user-controllable. Facet filters
+only NARROW within what the user may already see.
+"""
+import os
+import time
+import uuid
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+import bqlog
+import config
+import discovery
+import gcsdoc
+import generate
+import identity
+import permissions
+
+app = FastAPI(title="GE Search Portal")
+
+
+def _user(request):
+    u = identity.resolve(request.headers)
+    # demo only: GET links (e.g. /api/doc) can't set X-Demo-User, so accept ?u=.
+    # In prod (IDENTITY_SOURCE=iap) identity comes from the signed IAP header and this
+    # query param is never consulted — so it can't be used to impersonate.
+    if not u and config.IDENTITY_SOURCE == "demo":
+        u = (request.query_params.get("u") or "").strip()
+    return u or _default_user()
+
+
+def _default_user():
+    ps = permissions.personas()
+    return ps[0]["email"] if ps else ""
+
+
+@app.get("/healthz")
+def healthz():
+    return "ok"
+
+
+@app.get("/api/me")
+def me(request: Request):
+    user = _user(request)
+    return {"user": user, "groups": sorted(permissions.groups_for_user(user))}
+
+
+@app.get("/api/config")
+def get_config():
+    return {
+        "dataStoreId": config.DATA_STORE_ID,
+        "identitySource": config.IDENTITY_SOURCE,
+        "personas": permissions.personas(),       # drives the demo persona switcher
+        "facetFields": discovery.FACET_FIELDS,     # which data filters the UI may offer
+        "models": config.answer_models(),          # LLMs the UI may pick for the AI answer
+    }
+
+
+def _model(body):
+    """Validate a client-requested model against the server allowlist; None → default."""
+    m = (body.get("model") or "").strip()
+    return m if m in config.ANSWER_MODEL_IDS else None
+
+
+def _parse_query(body):
+    query = (body.get("query") or "").strip()
+    page_size = int(body.get("pageSize") or config.PAGE_SIZE)
+    selected = {f: v for f, v in (body.get("facets") or {}).items() if v}
+    return query, page_size, selected
+
+
+def _retrieve_trim(query, page_size, selected, user):
+    """Shared retrieval + security trim for /api/search and /api/answer.
+
+    Returns (groups, available_facets, allowed_docs). The ACL trim and faceting run
+    SERVER-SIDE in VAIS via the indexed acl_groups field (scales to any corpus size;
+    facets cascade exactly). As defense-in-depth we re-verify the returned page against
+    the LIVE Firestore graph — so a doc whose acl_groups drifted out of date is still
+    dropped (O(page_size), one Firestore 'in' query).
+    """
+    groups = permissions.groups_for_user(user)
+    allowed, available = discovery.search_faceted(query, page_size, sorted(groups), selected)
+    allowed = permissions.trim(allowed, groups)
+    return groups, available, allowed
+
+
+def _citations(docs):
+    return [{"index": i + 1, "title": d["title"], "sourceUrl": d.get("sourceUrl"),
+             "snippet": d.get("snippet")} for i, d in enumerate(docs)]
+
+
+@app.post("/api/search")
+async def search(request: Request):
+    """Fast path: retrieve + ACL-trim + facets. No LLM — the AI answer is opt-in
+    (toggle / on-demand button) and served separately by /api/answer."""
+    body = await request.json()
+    query, page_size, selected = _parse_query(body)
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+
+    user = _user(request)
+    groups, available, allowed = _retrieve_trim(query, page_size, selected, user)
+
+    search_id = uuid.uuid4().hex  # correlation id: ties AI turns + feedback back to this search
+    bqlog.log_search(user, query, groups, selected, allowed, search_id=search_id)
+    # feed VAIS autotuning (learn-to-rank)
+    discovery.write_user_event("search", query=query,
+                               document_ids=[d["documentId"] for d in allowed], user_id=user)
+
+    return {
+        "user": user,
+        "searchId": search_id,
+        "results": allowed,
+        "citations": _citations(allowed),
+        "appliedFilters": selected,
+        # filter values come from VAIS metadata, tallied over the ACL-TRIMMED set so
+        # counts never reveal documents the user can't see (dynamic + leak-safe).
+        "availableFilters": available,
+    }
+
+
+@app.post("/api/answer")
+async def answer(request: Request):
+    """On-demand AI answer over the SAME ACL-trimmed set as /api/search (re-derived
+    server-side so the trim is authoritative — never trusts client-sent docs)."""
+    body = await request.json()
+    query, page_size, selected = _parse_query(body)
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+
+    user = _user(request)
+    groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
+    requested, use_search = _model(body), bool(body.get("useSearch"))
+    t0 = time.monotonic()
+
+    if config.ANSWER_MODE == "de_filter":
+        summary, _ = discovery.answer_with_filter(query, [d["documentId"] for d in allowed])
+        used_model = "vais-summary"
+    else:
+        res = generate.answer(query, allowed, model=requested,
+                              thinking=config.ANSWER_THINKING or None, use_search=use_search)
+        summary, used_model, use_search = res["text"], res["model"], res["search"]
+
+    bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),
+                      query=query, model_requested=requested or "", model_used=used_model,
+                      used_search=use_search, result_count=len(allowed),
+                      latency_ms=int((time.monotonic() - t0) * 1000))
+    return {"user": user, "summary": summary, "citations": _citations(allowed)}
+
+
+@app.post("/api/ask")
+async def ask(request: Request):
+    """Free-form Q&A over the CURRENT result set: same ACL-trimmed docs as /api/search
+    (re-derived server-side), answering the user's follow-up `question` rather than
+    summarizing. Powers the 'Ask about these documents' box on the answer card."""
+    body = await request.json()
+    query, page_size, selected = _parse_query(body)
+    question = (body.get("question") or "").strip()
+    if not query or not question:
+        return JSONResponse({"error": "query and question are required"}, status_code=400)
+
+    user = _user(request)
+    groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
+    requested = _model(body)
+    t0 = time.monotonic()
+    # Q&A over the result set: high thinking for better answers + optional web grounding
+    res = generate.answer(question, allowed, model=requested, thinking=config.ASK_THINKING,
+                          use_search=bool(body.get("useSearch")))
+    discovery.write_user_event("search", query=question,
+                               document_ids=[d["documentId"] for d in allowed], user_id=user)
+    bqlog.log_ai_turn(user, groups, "ask", search_id=(body.get("searchId") or ""),
+                      query=query, question=question, model_requested=requested or "",
+                      model_used=res["model"], used_search=res["search"],
+                      result_count=len(allowed), latency_ms=int((time.monotonic() - t0) * 1000))
+    return {"user": user, "answer": res["text"], "citations": _citations(allowed)}
+
+
+def _doc_page(title, message, status):
+    """A small standalone HTML page — this endpoint is opened in a new browser tab,
+    so a JSON body would render as broken text."""
+    html = (
+        "<!doctype html><html lang=en><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<title>{title}</title><style>"
+        "body{font:16px/1.5 system-ui,sans-serif;color:#1f2933;background:#f7f9fc;"
+        "display:grid;place-items:center;min-height:100vh;margin:0}"
+        ".card{max-width:30rem;padding:2rem;text-align:center;background:#fff;"
+        "border:1px solid #e4e9f0;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}"
+        "h1{font-size:1.15rem;margin:0 0 .5rem}p{color:#52606d;margin:0 0 1.25rem}"
+        "a{color:#0b57d0;text-decoration:none;font-weight:600}a:hover{text-decoration:underline}"
+        f"</style></head><body><div class=card><h1>{title}</h1><p>{message}</p>"
+        "<a href='/'>← Back to search</a></div></body></html>"
+    )
+    return HTMLResponse(html, status_code=status)
+
+
+@app.post("/api/doc/qa")
+async def doc_qa(request: Request):
+    """Ask a question (or 'summarize') about ONE specific document. ACL-checked, and
+    grounded only on that document (multimodal PDF read, or its extracted text)."""
+    body = await request.json()
+    document_id = (body.get("documentId") or "").strip()
+    question = (body.get("question") or "").strip()
+    if not document_id or not question:
+        return JSONResponse({"error": "documentId and question are required"}, status_code=400)
+
+    user = _user(request)
+    groups = permissions.groups_for_user(user)
+    if not (permissions.doc_groups([document_id]).get(document_id, set()) & groups):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    meta = discovery.get_document(document_id)
+    if not meta:
+        return JSONResponse({"error": "document not found"}, status_code=404)
+
+    gcs = meta.get("gcsUri") or ""
+    # PDFs are read via multimodal attach; everything else is grounded on extracted text.
+    use_pdf = config.MULTIMODAL_ANSWERS and gcs.lower().endswith(".pdf")
+    context = "" if use_pdf else gcsdoc.read_text(gcs)
+    requested = _model(body)
+    t0 = time.monotonic()
+    res = generate.answer_about_doc(question, meta.get("title") or document_id, gcs, context,
+                                    model=requested, thinking=config.ASK_THINKING,
+                                    use_search=bool(body.get("useSearch")))
+
+    discovery.write_user_event("view-item", query=question,
+                               document_ids=[document_id], user_id=user)
+    bqlog.log_ai_turn(user, groups, "doc_qa", search_id=(body.get("searchId") or ""),
+                      question=question, document_id=document_id,
+                      model_requested=requested or "", model_used=res["model"],
+                      used_search=res["search"], result_count=1,
+                      latency_ms=int((time.monotonic() - t0) * 1000))
+    return {"documentId": document_id, "title": meta.get("title"), "answer": res["text"]}
+
+
+@app.get("/api/doc/{document_id}")
+def doc(document_id: str, request: Request):
+    """Redirect to a short-lived signed URL for the document's imported GCS copy.
+
+    ACL-checked: the user must share a group with the document, exactly as in search —
+    so this can't be used to reach a file they couldn't retrieve. Returns a friendly
+    page (not a GCS error) if access is denied or the imported file no longer exists."""
+    user = _user(request)
+    groups = permissions.groups_for_user(user)
+    doc_grp = permissions.doc_groups([document_id]).get(document_id, set())
+    if not (doc_grp & groups):
+        return _doc_page("Access denied",
+                         "You don't have access to this document under the current persona.",
+                         403)
+    uri = discovery.get_content_uri(document_id)
+    url = gcsdoc.signed_url(uri) if uri else None
+    if not url:
+        # uri missing, or the imported object was deleted (stale VAIS reference)
+        return _doc_page("Document unavailable",
+                         "The imported copy of this document is no longer available. "
+                         "Try the original web source from the search results.",
+                         404)
+    return RedirectResponse(url)
+
+
+@app.post("/api/feedback")
+async def feedback(request: Request):
+    body = await request.json()
+    user = _user(request)
+    doc_id = body.get("documentId", "")
+    bqlog.log_feedback(user, body.get("query", ""), doc_id, body.get("title", ""),
+                       body.get("vote", ""), search_id=body.get("searchId", ""))
+    # an up-vote is a strong relevance signal → report as a view-item event
+    if body.get("vote") == "up" and doc_id:
+        discovery.write_user_event("view-item", query=body.get("query"),
+                                   document_ids=[doc_id], user_id=user)
+    return {"ok": True}
+
+
+# Serve the built frontend (if present) from the same process.
+_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+if os.path.isdir(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="spa")

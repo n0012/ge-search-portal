@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-amgen-surface text-amgen-ink font-sans antialiased;
+}
+
+/* Markdown answer styling */
+.prose-answer p {
+  @apply mb-3 leading-relaxed text-[15px] text-slate-700;
+}
+.prose-answer ul {
+  @apply mb-3 list-disc pl-5 text-[15px] text-slate-700;
+}
+.prose-answer strong {
+  @apply font-semibold text-amgen-ink;
+}
+.prose-answer a {
+  @apply text-amgen-blue underline;
+}
+
+/* shimmer skeleton bar */
+.skeleton {
+  @apply relative overflow-hidden rounded-full bg-amgen-blue/10;
+}
+.skeleton::after {
+  content: "";
+  @apply absolute inset-0 -translate-x-full animate-shimmer;
+  background: linear-gradient(90deg, transparent, rgba(0, 99, 195, 0.12), transparent);
+}

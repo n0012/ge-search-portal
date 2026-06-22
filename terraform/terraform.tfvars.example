@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and edit. deploy-all.sh passes project_id/region on the CLI, so
+# the only thing you usually need here is iap_members (who can open the site). If you skip
+# this file entirely, deploy-all.sh auto-grants the deploying gcloud user so you can get in.
+
+# REQUIRED for a shared demo: who can REACH the site via IAP.
+# Prefer a group or your domain over listing individuals.
+iap_members = ["domain:YOUR-DOMAIN.com"] # or ["group:team@your-domain.com", "user:you@your-domain.com"]
+
+# identity_source = "demo"   # demo = persona switcher drives ACL (showcases).
+#                            # iap  = each signed-in user filters their OWN data (real use).
+
+# project_id = "your-gcp-project"   # normally passed by deploy-all.sh
+# region     = "us-central1"
+# location   = "global"
+
+# gemini_model     = "gemini-3.5-flash"        # AI answer model (must be enabled in your project/region)
+# gemini_pro_model = "gemini-3.1-pro-preview"  # failover when docs exceed the flash context
+# ingest_limit     = "30"                       # docs per sub-source for the bulk ingest

@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 580" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.6;fill:none}
+    </style>
+  </defs>
+  <rect width="1040" height="580" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">AI summarization &amp; document Q&amp;A — opt-in, grounded, ACL-safe</text>
+  <text x="40" y="70" font-size="13" class="m">Search is fast and LLM-free by default. AI is opt-in; every answer is grounded ONLY on the user's ACL-trimmed documents.</text>
+
+  <!-- three surfaces -->
+  <text x="40" y="106" font-size="13" class="t h">Three AI surfaces (each opt-in)</text>
+  <g font-size="12.5">
+    <rect x="40" y="118" width="306" height="86" rx="12" fill="#92BE43"/>
+    <text x="60" y="144" class="w h">Summarize results</text>
+    <text x="60" y="165" class="w">POST /api/answer</text>
+    <text x="60" y="184" class="w">synthesizes the whole result set,</text>
+    <text x="60" y="199" class="w">with inline citations</text>
+
+    <rect x="366" y="118" width="306" height="86" rx="12" fill="#15909C"/>
+    <text x="386" y="144" class="w h">Ask about these documents</text>
+    <text x="386" y="165" class="w">POST /api/ask</text>
+    <text x="386" y="184" class="w">free-form follow-up Q&amp;A across</text>
+    <text x="386" y="199" class="w">the current result set</text>
+
+    <rect x="692" y="118" width="308" height="86" rx="12" fill="#0063C3"/>
+    <text x="712" y="144" class="w h">Per-document Q&amp;A</text>
+    <text x="712" y="165" class="w">POST /api/doc/qa</text>
+    <text x="712" y="184" class="w">question or summary grounded</text>
+    <text x="712" y="199" class="w">on ONE document</text>
+  </g>
+
+  <!-- arrows into shared pipeline -->
+  <line x1="193" y1="204" x2="193" y2="244" class="flow" marker-end="url(#arr4)"/>
+  <line x1="519" y1="204" x2="519" y2="244" class="flow" marker-end="url(#arr4)"/>
+  <line x1="846" y1="204" x2="846" y2="244" class="flow" marker-end="url(#arr4)"/>
+
+  <!-- shared generation pipeline -->
+  <rect x="40" y="246" width="960" height="120" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="272" font-size="13" class="t h">Shared, ACL-safe generation path (re-derived server-side — never trusts client-sent docs)</text>
+  <g font-size="12.5">
+    <rect x="60" y="288" width="250" height="58" rx="10" fill="#ffffff" stroke="#E5EAF1" stroke-width="1.5"/>
+    <text x="78" y="312" class="t h">ACL-trimmed documents</text>
+    <text x="78" y="331" class="m">acl_groups ∩ user groups</text>
+    <line x1="310" y1="317" x2="344" y2="317" class="flow" marker-end="url(#arr4)"/>
+    <rect x="346" y="288" width="300" height="58" rx="10" fill="#0056B3"/>
+    <text x="364" y="312" class="w h">Gemini (grounded)</text>
+    <text x="364" y="331" class="w">cites sources · omits, never invents</text>
+    <line x1="646" y1="317" x2="680" y2="317" class="flow" marker-end="url(#arr4)"/>
+    <rect x="682" y="288" width="298" height="58" rx="10" fill="#ffffff" stroke="#E5EAF1" stroke-width="1.5"/>
+    <text x="700" y="312" class="t h">Answer + citations</text>
+    <text x="700" y="331" class="m">Markdown · copyable · logged</text>
+  </g>
+
+  <!-- option chips -->
+  <text x="40" y="398" font-size="13" class="t h">Per-request options</text>
+  <g font-size="12">
+    <rect x="40" y="410" width="232" height="50" rx="10" class="card"/>
+    <text x="58" y="431" class="t h">Model picker</text>
+    <text x="58" y="449" class="m">Flash (default) → Pro on overflow</text>
+
+    <rect x="284" y="410" width="210" height="50" rx="10" class="card"/>
+    <text x="302" y="431" class="t h">High thinking</text>
+    <text x="302" y="449" class="m">on Q&amp;A for better answers</text>
+
+    <rect x="506" y="410" width="232" height="50" rx="10" class="card"/>
+    <text x="524" y="431" class="t h">Google Search (opt-in)</text>
+    <text x="524" y="449" class="m">adds public web context</text>
+
+    <rect x="750" y="410" width="250" height="50" rx="10" class="card"/>
+    <text x="768" y="431" class="t h">Multimodal</text>
+    <text x="768" y="449" class="m">Gemini reads the docs' PDF pages</text>
+  </g>
+
+  <!-- footer -->
+  <rect x="40" y="478" width="960" height="74" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="502" font-size="13" class="t h">Why opt-in</text>
+  <text x="60" y="522" font-size="12.5" class="m">• Default OFF keeps search fast and cheap; a header toggle + on-demand button generate the answer only when asked.</text>
+  <text x="60" y="541" font-size="12.5" class="m">• Every AI turn is logged to BigQuery ai_turns (model used, web-search flag, latency, search_id) — joinable back to the search.</text>
+</svg>

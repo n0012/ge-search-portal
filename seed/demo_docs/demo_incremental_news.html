@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>AlphaProteo: de novo protein binder design (demo)</title></head>
+<body>
+<h1>AlphaProteo: generative design of de novo protein binders</h1>
+<p><em>DeepMind research note — demo document for the incremental ingest pipeline.</em></p>
+<p>AlphaProteo is a generative model that designs novel protein binders directly from a
+target structure, achieving experimentally validated binding affinities without iterative
+screening. This note summarizes the approach for evaluating the GE Search Portal's
+incremental (catalog-driven) ingestion path.</p>
+<h2>Key points</h2>
+<ul>
+  <li>Designs high-affinity binders to a target protein from its 3D structure.</li>
+  <li>Reduces wet-lab iterations versus traditional directed-evolution screening.</li>
+  <li>Relevant to therapeutic antibody and binder discovery workflows.</li>
+</ul>
+<p>This document was added to the corpus via the reconcile job to demonstrate that a NEW
+record appearing in the catalog is staged to GCS, imported into Vertex AI Search with its
+ACL groups, and becomes searchable for authorized users only.</p>
+</body>
+</html>

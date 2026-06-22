@@ -1,0 +1,69 @@
+# Build the app/ingest image, push to Artifact Registry, then point the Cloud Run
+# service + ingest job at it. Run via deploy-all.sh (uses the ge-search-build SA).
+substitutions:
+  _REGION: us-central1
+  _REPO: ge-search
+  _IMAGE: ge-search-portal
+  _SERVICE: ge-search-portal
+  _JOB: ge-search-ingest
+  _RECONCILE_JOB: ge-search-reconcile
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest"]
+    waitFor: [build]
+
+  - id: deploy-service
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - ${_SERVICE}
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+      - --project=$PROJECT_ID
+    waitFor: [push]
+
+  - id: deploy-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_JOB}
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+      - --project=$PROJECT_ID
+    waitFor: [push]
+
+  - id: deploy-reconcile-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_RECONCILE_JOB}
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+      - --project=$PROJECT_ID
+    waitFor: [push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+
+# Required when submitting with a user-specified service account.
+options:
+  logging: CLOUD_LOGGING_ONLY

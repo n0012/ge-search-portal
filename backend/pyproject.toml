@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ge-search-portal-backend"
+version = "0.1.0"
+description = "FastAPI backend: VAIS retrieval + Firestore security trimming + Gemini answers"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "google-auth>=2.29",
+    "requests>=2.31",
+    "google-cloud-firestore>=2.16",
+    "google-cloud-storage>=2.16",
+    "google-cloud-bigquery>=3.20",
+    "google-genai>=0.3",
+    "pyyaml>=6.0",
+]
+
+# Flat layout: declare the modules explicitly (setuptools won't auto-discover them).
+[tool.setuptools]
+py-modules = ["main", "config", "core", "discovery", "permissions",
+              "generate", "identity", "bqlog"]

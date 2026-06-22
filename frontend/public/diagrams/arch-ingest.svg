@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 668" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.6;fill:none}
+    </style>
+  </defs>
+  <rect width="1040" height="668" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Catalog &amp; document-processing pipeline</text>
+  <text x="40" y="70" font-size="13" class="m">Firestore catalog is the single on-ramp; an idempotent reconcile job syncs only the delta into VAIS (initial load + incremental).</text>
+
+  <!-- on-ramps -->
+  <text x="40" y="104" font-size="13" class="t h">On-ramps → write a catalog record</text>
+  <g font-size="12">
+    <rect x="40" y="116" width="150" height="38" rx="9" class="card"/>
+    <text x="115" y="140" text-anchor="middle" class="t">add_document.py</text>
+    <rect x="200" y="116" width="170" height="38" rx="9" class="card"/>
+    <text x="285" y="140" text-anchor="middle" class="t">replicate_catalog.py</text>
+    <rect x="380" y="116" width="160" height="38" rx="9" class="card"/>
+    <text x="460" y="140" text-anchor="middle" class="t">manifest (fetcher)</text>
+  </g>
+
+  <!-- catalog + reconcile -->
+  <rect x="40" y="180" width="500" height="66" rx="12" fill="#15909C"/>
+  <text x="60" y="210" font-size="16" class="w h">Firestore · catalog collection</text>
+  <text x="60" y="231" font-size="12" class="w">document_id · metadata · groups · content_hash · deleted · vais_state</text>
+  <line x1="290" y1="154" x2="290" y2="178" class="flow" marker-end="url(#arr2)"/>
+  <line x1="540" y1="213" x2="592" y2="213" class="flow" marker-end="url(#arr2)"/>
+  <rect x="594" y="170" width="406" height="86" rx="12" fill="#0056B3"/>
+  <text x="614" y="197" font-size="15" class="w h">reconcile.py — Cloud Run Job</text>
+  <text x="614" y="218" font-size="12" class="w">plan_delta(): load new/changed · purge tombstoned</text>
+  <text x="614" y="237" font-size="12" class="w">idempotent · Cloud Scheduler (every 15 min)</text>
+
+  <!-- each run -->
+  <text x="40" y="288" font-size="13" class="t h">Each reconcile run</text>
+  <g font-size="12">
+    <rect x="40" y="300" width="220" height="52" rx="10" class="card"/>
+    <text x="60" y="322" class="t h">1 · Stage content</text>
+    <text x="60" y="340" class="m">download → Cloud Storage</text>
+    <line x1="260" y1="326" x2="286" y2="326" class="flow" marker-end="url(#arr2)"/>
+    <rect x="288" y="300" width="230" height="52" rx="10" class="card"/>
+    <text x="308" y="322" class="t h">2 · Import / delete</text>
+    <text x="308" y="340" class="m">documents:import → VAIS</text>
+    <line x1="518" y1="326" x2="544" y2="326" class="flow" marker-end="url(#arr2)"/>
+    <rect x="546" y="300" width="214" height="52" rx="10" class="card"/>
+    <text x="566" y="322" class="t h">3 · Seed ACL graph</text>
+    <text x="566" y="340" class="m">Firestore document_groups</text>
+    <line x1="760" y1="326" x2="786" y2="326" class="flow" marker-end="url(#arr2)"/>
+    <rect x="788" y="300" width="212" height="52" rx="10" class="card"/>
+    <text x="808" y="322" class="t h">4 · Ledger</text>
+    <text x="808" y="340" class="m">BigQuery ingestion_log</text>
+  </g>
+
+  <!-- parser band -->
+  <text x="40" y="384" font-size="13" class="t h">Inside Vertex AI Search on import — document processing</text>
+  <line x1="403" y1="352" x2="403" y2="406" class="flow" marker-end="url(#arr2)"/>
+  <g font-size="12">
+    <rect x="40" y="398" width="296" height="74" rx="10" fill="#F7F9FC" stroke="#0063C3" stroke-width="1.5"/>
+    <text x="58" y="421" class="t h">Layout parser</text>
+    <text x="58" y="440" class="m">extracts text, tables &amp; headings;</text>
+    <text x="58" y="456" class="m">OCR for scanned PDFs</text>
+    <line x1="336" y1="435" x2="362" y2="435" class="flow" marker-end="url(#arr2)"/>
+    <rect x="364" y="398" width="300" height="74" rx="10" fill="#F7F9FC" stroke="#0063C3" stroke-width="1.5"/>
+    <text x="382" y="421" class="t h">Layout-based chunking</text>
+    <text x="382" y="440" class="m">~500-token chunks that keep</text>
+    <text x="382" y="456" class="m">structure (ancestor headings)</text>
+    <line x1="664" y1="435" x2="690" y2="435" class="flow" marker-end="url(#arr2)"/>
+    <rect x="692" y="398" width="308" height="74" rx="10" fill="#0063C3"/>
+    <text x="710" y="421" class="w h">Hybrid index</text>
+    <text x="710" y="440" class="w">semantic + keyword over chunks;</text>
+    <text x="710" y="456" class="w">acl_groups indexed (filterable)</text>
+  </g>
+
+  <!-- delta rule -->
+  <rect x="40" y="498" width="960" height="56" rx="10" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="521" font-size="13" class="t h">Delta rule (hash-keyed, idempotent)</text>
+  <text x="60" y="540" font-size="12.5" class="m">LOAD when not deleted and (never loaded OR content_hash ≠ loaded_hash) · PURGE when tombstoned · else SKIP. Same job = initial load AND incremental.</text>
+
+  <!-- bulk -->
+  <rect x="40" y="572" width="960" height="46" rx="10" fill="#92BE43"/>
+  <text x="60" y="600" font-size="12.5" class="w">Initial bulk load: <tspan font-weight="700">ge-search-ingest</tspan> Job — fetch corpus (SEC EDGAR · arXiv · PubMed Central) → metadata → import → seed ACLs → declare/sync acl_groups.</text>
+</svg>

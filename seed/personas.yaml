@@ -1,0 +1,26 @@
+# Demo users → groups. Drives the persona switcher (UI) and the Firestore
+# `group_users` edges. A user sees a document iff some group is in BOTH this
+# user's groups AND that document's `document_groups` (see acl_rules.yaml).
+users:
+  - email: dana.finance@example.com
+    display_name: Dana Whitfield
+    title: Finance
+    groups: [finance]
+
+  - email: riley.research@example.com
+    display_name: Riley Chen
+    title: Research
+    groups: [research]
+
+  # Executive with FULL access — member of every group, so the same query returns
+  # BOTH finance and research results (demonstrates multi-group access).
+  - email: sam.cxo@example.com
+    display_name: Sam Okafor
+    title: Chief Data & AI Officer (CXO)
+    groups: [finance, research]
+
+  # Optional minimal-access persona (sees only shared / all-employees docs):
+  # - email: intern@example.com
+  #   display_name: Sam Intern
+  #   title: Intern
+  #   groups: [all-employees]

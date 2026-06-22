@@ -1,0 +1,32 @@
+# corpus PDFs are downloaded, never committed
+corpus/
+*.pdf
+
+# generated artifacts
+metadata.jsonl
+_manifest.jsonl
+
+# python
+.venv/
+.seedvenv/
+__pycache__/
+*.pyc
+
+# node / frontend
+node_modules/
+dist/
+
+# env / secrets
+.env
+*.local
+
+# build artifact
+frontend/tsconfig.tsbuildinfo
+
+# terraform local
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+
+# terraform per-deployment config (use terraform.tfvars.example as a template)
+terraform/terraform.tfvars

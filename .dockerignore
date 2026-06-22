@@ -1,0 +1,10 @@
+corpus/
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+_manifest.jsonl
+metadata.jsonl
+.git
+*.pdf
+.env

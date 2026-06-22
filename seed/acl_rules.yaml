@@ -1,0 +1,13 @@
+# Maps document metadata → the group(s) a document belongs to.
+# scripts/04_seed_acls.py expands these into Firestore `document_groups` edges,
+# keyed by the deterministic document id from metadata.jsonl.
+
+# Primary rule: a document's `department` decides its group(s).
+by_department:
+  finance:  [finance]
+  research: [research]
+
+# Optional per-document overrides (by document id). Example: expose a specific
+# annual report to an extra "exec" group as well.
+# overrides:
+#   amgen_2023_annual_report: [finance, exec]
