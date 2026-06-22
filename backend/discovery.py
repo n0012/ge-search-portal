@@ -118,7 +118,9 @@ def retrieve(query, page_size, filter_="", with_facets=False):
 
 def rerank(query, docs, top_n=None):
     """Reorder docs with the Discovery Engine semantic Ranking API (cross-encoder).
-    Best-effort: disabled, empty, or any error → docs returned unchanged."""
+    Attaches the per-doc relevance score as `rerankScore` (0-1) for optional display.
+    Best-effort: disabled, empty, or any error → docs returned unchanged. Emits a one-line
+    structured log on success and on failure (the feature is otherwise invisible)."""
     n = top_n or config.RERANK_TOP_N
     if not config.RERANK or not query or len(docs) < 2:
         return docs
@@ -134,13 +136,25 @@ def rerank(query, docs, top_n=None):
         r = _sess().post(url, json=body, headers={"X-Goog-User-Project": config.PROJECT_ID},
                          timeout=20)
         r.raise_for_status()
-        order = [int(rec["id"]) for rec in r.json().get("records", []) if "id" in rec]
-    except Exception:
+        # ignoreRecordDetailsInResponse=True → each record is just {id, score}
+        ranked = [(int(rec["id"]), rec.get("score")) for rec in r.json().get("records", [])
+                  if "id" in rec]
+    except Exception as e:
+        print("rerank skipped: %s: %s" % (type(e).__name__, str(e)[:200]), flush=True)
         return docs
-    if not order:
+    if not ranked:
         return docs
+    order = [i for i, _ in ranked]
+    for i, score in ranked:
+        if i < len(head) and score is not None:
+            head[i]["rerankScore"] = round(float(score), 4)
     seen = set(order)
-    return [head[i] for i in order if i < len(head)] + [d for i, d in enumerate(docs) if i not in seen]
+    out = ([head[i] for i in order if i < len(head)]
+           + [d for i, d in enumerate(docs) if i not in seen])
+    print("rerank ok: model=%s in=%d ranked=%d top3=%s" % (
+        config.RERANK_MODEL, len(head), len(order),
+        ",".join("%.3f" % (d.get("rerankScore") or 0) for d in out[:3])), flush=True)
+    return out
 
 
 def search_faceted(query, page_size, group_ids, selected):

@@ -41,6 +41,7 @@ export interface SearchResult {
   venue?: string;
   year?: string;
   publish_date?: string;
+  rerankScore?: number; // semantic Ranking API relevance (0-1); shown in demo mode
 }
 
 export interface Citation {

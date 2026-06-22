@@ -234,6 +234,7 @@ export default function App() {
               aiOn={aiOn}
               model={model}
               searchId={searchId}
+              showScore={cfg.identitySource === "demo"}
               onVote={(doc: SearchResult, vote) =>
                 sendFeedback(query, doc.documentId, doc.title, vote, persona?.email, searchId)
               }

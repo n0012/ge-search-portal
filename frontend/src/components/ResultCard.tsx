@@ -34,6 +34,7 @@ export function ResultCard({
   aiOn,
   model,
   searchId,
+  showScore,
   onVote,
 }: {
   doc: SearchResult;
@@ -41,6 +42,7 @@ export function ResultCard({
   aiOn?: boolean;
   model?: string;
   searchId?: string;
+  showScore?: boolean;
   onVote?: (doc: SearchResult, vote: "up" | "down") => void;
 }) {
   const [vote, setVote] = useState<"up" | "down" | null>(null);
@@ -66,6 +68,14 @@ export function ResultCard({
         <span className="rounded bg-amgen-surface px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amgen-muted">
           {doc.doc_type?.replace(/_/g, " ") || doc.department || "Document"}
         </span>
+        {showScore && typeof doc.rerankScore === "number" && (
+          <span
+            className="rounded bg-amgen-blue/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amgen-blue"
+            title="Semantic re-rank relevance (Ranking API · semantic-ranker-default). Shown in demo mode."
+          >
+            relevance {doc.rerankScore.toFixed(2)}
+          </span>
+        )}
         <nav className="flex min-w-0 items-center gap-1 text-[11px] text-amgen-muted">
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-1">
