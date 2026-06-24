@@ -94,10 +94,28 @@ def test_parse_doc_title_falls_back_to_id():
     assert core.parse_doc({"document": {"id": "z"}})["title"] == "z"
 
 
+def test_parse_doc_joins_extractive_segments():
+    result = {"document": {"id": "d", "derivedStructData": {
+        "extractive_segments": [{"content": "seg one"}, {"content": ""}, {"content": "seg two"}],
+    }}}
+    d = core.parse_doc(result)
+    assert d["segment"] == "seg one\n\nseg two"
+
+
+def test_parse_doc_segment_empty_when_absent():
+    d = core.parse_doc({"document": {"id": "d", "derivedStructData": {"snippets": [{"snippet": "s"}]}}})
+    assert d["segment"] == "" and d["snippet"] == "s"
+
+
 # ---- multimodal answer helpers ----------------------------------------------
 def test_build_prompt_includes_sources_and_question():
     p = core.build_prompt("what is X?", [{"title": "Doc A", "snippet": "hello"}])
     assert "Doc A" in p and "what is X?" in p and "[1]" in p
+
+
+def test_build_prompt_prefers_segment_over_snippet():
+    p = core.build_prompt("q", [{"title": "Doc A", "snippet": "short snip", "segment": "rich passage"}])
+    assert "rich passage" in p and "short snip" not in p
 
 
 def test_pdf_uris_filters_to_gcs_and_caps():

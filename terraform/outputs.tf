@@ -7,6 +7,11 @@ output "data_store_id" {
   value = google_discovery_engine_data_store.ds.data_store_id
 }
 
+output "engine_id" {
+  value       = google_discovery_engine_search_engine.engine.engine_id
+  description = "Gemini Enterprise (Agentspace) app ID (app_type=APP_TYPE_INTRANET); the app queries its serving config (:search) + assistant (:streamAssist) so traffic bills through the GE subscription."
+}
+
 output "corpus_bucket" {
   value = "gs://${local.bucket_name}"
 }

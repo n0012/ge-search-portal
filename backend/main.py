@@ -26,7 +26,6 @@ import bqlog
 import config
 import discovery
 import gcsdoc
-import generate
 import identity
 import permissions
 
@@ -66,14 +65,7 @@ def get_config():
         "identitySource": config.IDENTITY_SOURCE,
         "personas": permissions.personas(),       # drives the demo persona switcher
         "facetFields": discovery.FACET_FIELDS,     # which data filters the UI may offer
-        "models": config.answer_models(),          # LLMs the UI may pick for the AI answer
     }
-
-
-def _model(body):
-    """Validate a client-requested model against the server allowlist; None → default."""
-    m = (body.get("model") or "").strip()
-    return m if m in config.ANSWER_MODEL_IDS else None
 
 
 def _parse_query(body):
@@ -144,22 +136,20 @@ async def answer(request: Request):
 
     user = _user(request)
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
-    requested, use_search = _model(body), bool(body.get("useSearch"))
     t0 = time.monotonic()
 
-    if config.ANSWER_MODE == "de_filter":
-        summary, _ = discovery.answer_with_filter(query, [d["documentId"] for d in allowed])
-        used_model = "vais-summary"
-    else:
-        res = generate.answer(query, allowed, model=requested,
-                              thinking=config.ANSWER_THINKING or None, use_search=use_search)
-        summary, used_model, use_search = res["text"], res["model"], res["search"]
+    # Grounded answer via the GE engine assistant (:streamAssist), restricted to the authorized
+    # doc ids — covered by the GE subscription and ACL-safe. Surface its grounded references as
+    # citations when present, else fall back to the trimmed result set.
+    allowed_ids = [d["documentId"] for d in allowed]
+    summary, refs = discovery.assist(query, allowed_ids)
+    citations = _citations(refs) if refs else _citations(allowed)
 
     bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),
-                      query=query, model_requested=requested or "", model_used=used_model,
-                      used_search=use_search, result_count=len(allowed),
+                      query=query, model_requested="", model_used="ge-assist",
+                      used_search=False, result_count=len(allowed),
                       latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "summary": summary, "citations": _citations(allowed)}
+    return {"user": user, "summary": summary, "citations": citations}
 
 
 @app.post("/api/ask")
@@ -175,18 +165,18 @@ async def ask(request: Request):
 
     user = _user(request)
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
-    requested = _model(body)
     t0 = time.monotonic()
-    # Q&A over the result set: high thinking for better answers + optional web grounding
-    res = generate.answer(question, allowed, model=requested, thinking=config.ASK_THINKING,
-                          use_search=bool(body.get("useSearch")))
+    # Follow-up Q&A grounded via the GE engine assistant over ONLY the authorized docs.
+    allowed_ids = [d["documentId"] for d in allowed]
+    answer_text, refs = discovery.assist(question, allowed_ids)
+    citations = _citations(refs) if refs else _citations(allowed)
     discovery.write_user_event("search", query=question,
-                               document_ids=[d["documentId"] for d in allowed], user_id=user)
+                               document_ids=allowed_ids, user_id=user)
     bqlog.log_ai_turn(user, groups, "ask", search_id=(body.get("searchId") or ""),
-                      query=query, question=question, model_requested=requested or "",
-                      model_used=res["model"], used_search=res["search"],
+                      query=query, question=question, model_requested="",
+                      model_used="ge-assist", used_search=False,
                       result_count=len(allowed), latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "answer": res["text"], "citations": _citations(allowed)}
+    return {"user": user, "answer": answer_text, "citations": citations}
 
 
 def _doc_page(title, message, status):
@@ -227,24 +217,18 @@ async def doc_qa(request: Request):
     if not meta:
         return JSONResponse({"error": "document not found"}, status_code=404)
 
-    gcs = meta.get("gcsUri") or ""
-    # PDFs are read via multimodal attach; everything else is grounded on extracted text.
-    use_pdf = config.MULTIMODAL_ANSWERS and gcs.lower().endswith(".pdf")
-    context = "" if use_pdf else gcsdoc.read_text(gcs)
-    requested = _model(body)
     t0 = time.monotonic()
-    res = generate.answer_about_doc(question, meta.get("title") or document_id, gcs, context,
-                                    model=requested, thinking=config.ASK_THINKING,
-                                    use_search=bool(body.get("useSearch")))
+    # Grounded on ONLY this document, via the GE engine assistant (covered + ACL-safe).
+    answer_text, _ = discovery.assist(question, [document_id])
 
     discovery.write_user_event("view-item", query=question,
                                document_ids=[document_id], user_id=user)
     bqlog.log_ai_turn(user, groups, "doc_qa", search_id=(body.get("searchId") or ""),
                       question=question, document_id=document_id,
-                      model_requested=requested or "", model_used=res["model"],
-                      used_search=res["search"], result_count=1,
+                      model_requested="", model_used="ge-assist",
+                      used_search=False, result_count=1,
                       latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"documentId": document_id, "title": meta.get("title"), "answer": res["text"]}
+    return {"documentId": document_id, "title": meta.get("title"), "answer": answer_text}
 
 
 @app.get("/api/doc/{document_id}")

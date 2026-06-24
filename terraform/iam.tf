@@ -34,12 +34,14 @@ resource "google_project_iam_member" "app" {
 # Narrow grant for the (otherwise read-only) app: report user events for autotuning and
 # call the semantic Ranking API — WITHOUT editor (which could modify/delete the data store).
 resource "google_project_iam_custom_role" "user_events_writer" {
-  project     = var.project_id
-  role_id     = "geSearchUserEventsWriter"
-  title       = "GE Search app — user events + ranking"
+  project = var.project_id
+  role_id = "geSearchUserEventsWriter"
+  title   = "GE Search app — user events + assistant"
   permissions = [
     "discoveryengine.userEvents.create",
     "discoveryengine.rankingConfigs.rank",
+    # Required to call the GE engine assistant (:assist / :streamAssist); not in viewer.
+    "discoveryengine.assistants.assist",
   ]
 }
 

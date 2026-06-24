@@ -1,12 +1,15 @@
 """Vertex AI Search (Discovery Engine) retrieval over the data store's serving config.
 
-Two calls:
-  retrieve()            -> ranked docs, NO summary (we summarize after the ACL trim)
-  answer_with_filter()  -> docs + AI summary, restricted to an explicit id set (5a)
+Answer/retrieval calls (ALL hit the GE engine so traffic is covered by the GE subscription):
+  retrieve()            -> ranked docs, NO summary (engine :search; we answer after the ACL trim)
+  assist()              -> grounded answer + citations via the GE engine assistant (:streamAssist),
+                           restricted to an explicit id set (the answer path for every surface)
+  answer_with_filter()  -> docs + AI summary via :search summarySpec (legacy, unused)
 
 A `filter` expression (built from UI facets) is applied SERVER-SIDE, so it scopes
 retrieval AND summarization before anything else — independent of the ACL trim.
 """
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -43,6 +46,14 @@ def _search(query, page_size, summary=False, filter_="", facet_fields=None):
         "queryExpansionSpec": {"condition": "AUTO"},
         "spellCorrectionSpec": {"mode": "AUTO"},
     }
+    # Ask VAIS for extractive segments (longer answer-bearing passages, with adjacent context)
+    # so the reranker and grounding prompt get real passages instead of keyword snippets.
+    if config.RERANK_EXTRACTIVE:
+        body["contentSearchSpec"]["extractiveContentSpec"] = {
+            "maxExtractiveSegmentCount": 2,
+            "numPreviousSegments": 1, "numNextSegments": 1,
+            "returnExtractiveSegmentScore": True,
+        }
     # recency boost (cf. query_level_boosting_filtering_and_facets.ipynb)
     boost_years = [y.strip() for y in config.BOOST_RECENT_YEARS.split(",") if y.strip()]
     if boost_years:
@@ -125,8 +136,11 @@ def rerank(query, docs, top_n=None):
     if not config.RERANK or not query or len(docs) < 2:
         return docs
     head = docs[:n]
+    # Feed the cross-encoder the extractive segment (answer-bearing passage) when available,
+    # falling back to the snippet/title. Snippets are short keyword fragments and score low;
+    # segments give the reranker fair, directly-relevant input.
     records = [{"id": str(i), "title": d.get("title") or "",
-                "content": (d.get("snippet") or d.get("title") or "")[:2000]}
+                "content": (d.get("segment") or d.get("snippet") or d.get("title") or "")[:4000]}
                for i, d in enumerate(head)]
     url = (f"https://{config.DE_HOST}/v1/projects/{config.PROJECT_ID}/locations/"
            f"{config.LOCATION}/rankingConfigs/default_ranking_config:rank")
@@ -151,8 +165,9 @@ def rerank(query, docs, top_n=None):
     seen = set(order)
     out = ([head[i] for i in order if i < len(head)]
            + [d for i, d in enumerate(docs) if i not in seen])
-    print("rerank ok: model=%s in=%d ranked=%d top3=%s" % (
-        config.RERANK_MODEL, len(head), len(order),
+    n_seg = sum(1 for d in head if d.get("segment"))
+    print("rerank ok: model=%s in=%d ranked=%d segments=%d/%d top3=%s" % (
+        config.RERANK_MODEL, len(head), len(order), n_seg, len(head),
         ",".join("%.3f" % (d.get("rerankScore") or 0) for d in out[:3])), flush=True)
     return out
 
@@ -251,3 +266,86 @@ def answer_with_filter(query, doc_ids, base_filter=""):
     js = _search(query, len(doc_ids), summary=True, filter_=filter_)
     summary = (js.get("summary", {}) or {}).get("summaryText", "")
     return summary, [_doc(r) for r in js.get("results", [])]
+
+
+def _assist_refs_to_docs(references):
+    """Map streamAssist grounding references -> our flat citation/doc shape. Each reference's
+    parent doc lives under `documentMetadata` ({document, uri, title}); cited chunk text (if any)
+    under `content`/`chunkText`. Deduped by document id, order preserved."""
+    out, seen = [], set()
+    for ref in references or []:
+        meta = ref.get("documentMetadata") or {}
+        doc_id = (meta.get("document") or "").rsplit("/", 1)[-1] or None
+        if doc_id and doc_id in seen:
+            continue
+        if doc_id:
+            seen.add(doc_id)
+        out.append({
+            "documentId": doc_id,
+            "title": meta.get("title") or "",
+            "sourceUrl": meta.get("uri"),
+            "snippet": ref.get("content") or ref.get("chunkText") or "",
+        })
+    return out
+
+
+def _parse_assist_stream(text):
+    """streamAssist returns a stream of StreamAssistResponse objects. Tolerate the common wire
+    forms: a single JSON array, one JSON object, or SSE 'data:' lines. Returns a list of events."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    try:
+        js = json.loads(text)
+        return js if isinstance(js, list) else [js]
+    except Exception:
+        pass
+    events = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if not line or line in ("[", "]", ","):
+            continue
+        line = line.rstrip(",")
+        try:
+            events.append(json.loads(line))
+        except Exception:
+            continue
+    return events
+
+
+def assist(query, doc_ids, base_filter=""):
+    """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), restricted to
+    the authorized doc ids. Querying the GE engine keeps the call covered by the GE subscription
+    (vs. the data store / a non-GE engine, which bill standalone). The SSE stream is consumed and
+    assembled into a single (answerText, citation_docs). Best-effort: errors -> ("", [])."""
+    if not doc_ids:
+        return "", []
+    id_filter = "id: ANY(" + ", ".join('"%s"' % i for i in doc_ids) + ")"
+    filter_ = f"({base_filter}) AND ({id_filter})" if base_filter else id_filter
+    url = f"https://{config.DE_HOST}/v1/{config.ASSISTANT_PATH}:streamAssist"
+    body = {"query": {"text": query},
+            "toolsSpec": {"vertexAiSearchSpec": {"filter": filter_}}}
+    try:
+        r = _sess().post(url, json=body, timeout=120)
+        r.raise_for_status()
+        events = _parse_assist_stream(r.text)
+    except Exception as e:
+        print("assist skipped: %s: %s" % (type(e).__name__, str(e)[:200]), flush=True)
+        return "", []
+    parts, refs = [], []
+    for ev in events:
+        ans = ev.get("answer", {}) or {}
+        for reply in ans.get("replies", []) or []:
+            gc = reply.get("groundedContent", {}) or {}
+            for p in (gc.get("content", {}) or {}).get("parts", []) or []:
+                if p.get("text"):
+                    parts.append(p["text"])
+            tgm = gc.get("textGroundingMetadata", {}) or {}
+            refs.extend(tgm.get("references", []) or [])
+    text = "".join(parts)
+    docs = _assist_refs_to_docs(refs)
+    print("assist ok: ids=%d events=%d refs=%d chars=%d" % (
+        len(doc_ids), len(events), len(docs), len(text)), flush=True)
+    return text, docs

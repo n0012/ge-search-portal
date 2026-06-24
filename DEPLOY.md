@@ -71,10 +71,24 @@ filters via their own `group_users` (so for real use you'd seed your actual user
 - **IAP consent screen (brand):** enabling IAP on Cloud Run may require the project's OAuth
   consent screen to exist. If `terraform apply` reports a missing IAP brand, create it once in
   the console (APIs & Services → OAuth consent screen, Internal) and re-run `--steps infra`.
-- **AI model availability:** AI answers use `gemini_model` (default `gemini-3.5-flash`) with
-  failover to `gemini_pro_model`. If those aren't enabled in your project/region, set
-  `gemini_model`/`gemini_pro_model` in `terraform.tfvars` to a model you have. **Search itself
-  is LLM-free**, so the core demo works even before AI models are sorted out (AI is opt-in).
+- **All traffic must hit the GE engine (billing).** Discovery Engine billing is determined by the
+  **engine you query**: calls to a **Gemini Enterprise engine's** serving config are covered by the
+  per-seat GE subscription; calls to the **data store directly** (or a non-GE VAIS engine) bill
+  standalone (SKU `93D6-7280-CF05`). So the app routes **both** `:search` and the assistant
+  (`:streamAssist`) at the GE engine. Terraform creates `google_discovery_engine_chat_engine.engine`
+  (`engine_id`, default `ge-search-app`) over the data store and sets `ENGINE_ID`/`ASSISTANT_ID` on
+  the Cloud Run service. **`ENGINE_ID` must be a genuine GE engine** — verify after deploy that no
+  `93D6-7280-CF05` charges accrue (see the billing check below). If a Terraform-created chat engine
+  isn't billed as GE, create the app in the Gemini Enterprise/Agentspace console and set `engine_id`
+  to it. Requires GE seats. IAM: the app SA's custom role adds `discoveryengine.assistants.assist`.
+- **Answers are text-grounded (no separate Gemini billing).** The GE assistant grounds on indexed
+  text/extractive segments — it does not do vision over raw PDF page images. We deliberately do
+  **not** make direct Vertex Gemini calls (which would bill separately per token, outside the
+  subscription), so every AI call stays covered. The standalone cross-encoder Ranking API is also
+  **off by default** (`RERANK=off`) for the same reason.
+- **Billing check (do this after deploy):** run a batch of searches + answers, then in Cloud
+  Billing → Reports group by **SKU** and confirm **no `93D6-7280-CF05`** charges — i.e. traffic is
+  attributed to the GE subscription, not standalone Vertex AI Search.
 - **Demo vs real identity:** the demo runs `identity_source = "demo"` (persona switcher drives
   ACL). For real per-user filtering set `identity_source = "iap"` and seed real users into
   Firestore `group_users`. See README → "Identity & access".

@@ -32,7 +32,6 @@ export function ResultCard({
   doc,
   userEmail,
   aiOn,
-  model,
   searchId,
   showScore,
   onVote,
@@ -40,7 +39,6 @@ export function ResultCard({
   doc: SearchResult;
   userEmail?: string;
   aiOn?: boolean;
-  model?: string;
   searchId?: string;
   showScore?: boolean;
   onVote?: (doc: SearchResult, vote: "up" | "down") => void;
@@ -142,7 +140,9 @@ export function ResultCard({
         )}
       </div>
 
-      {aiOn && <DocQA documentId={doc.documentId} userEmail={userEmail} model={model} searchId={searchId} />}
+      {aiOn && (
+        <DocQA documentId={doc.documentId} userEmail={userEmail} searchId={searchId} />
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Sparkles, Send, ChevronDown, ChevronUp, Loader2, Globe } from "lucide-react";
+import { Sparkles, Send, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 
 export interface Turn {
   q: string;
@@ -9,22 +9,20 @@ export interface Turn {
 }
 
 /** Reusable collapsible Q&A box. The parent supplies `ask` — grounded on one document
- *  (ResultCard) or on the whole result set (AnswerCard). Optional `summarize` quick-action
- *  and an opt-in Google Search toggle (adds public web context for research). */
+ *  (ResultCard) or on the whole result set (AnswerCard) via the GE engine assistant. Optional
+ *  `summarize` quick-action. */
 export function AskPanel({
   ask,
   title,
   placeholder,
   summarize,
-  allowWebSearch = true,
   defaultOpen = false,
   onTurnsChange,
 }: {
-  ask: (question: string, opts: { useSearch: boolean }) => Promise<string>;
+  ask: (question: string) => Promise<string>;
   title: string;
   placeholder: string;
   summarize?: { label: string; prompt: string };
-  allowWebSearch?: boolean;
   defaultOpen?: boolean;
   onTurnsChange?: (turns: Turn[]) => void;
 }) {
@@ -32,7 +30,6 @@ export function AskPanel({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [web, setWeb] = useState(false);
   const [err, setErr] = useState("");
 
   // surface the transcript to the parent (so the card's "Copy as Markdown" captures Q&A)
@@ -48,7 +45,7 @@ export function AskPanel({
     setErr("");
     setInput("");
     try {
-      const a = await ask(q, { useSearch: web });
+      const a = await ask(q);
       setTurns((t) => [...t, { q, a: a || "_No answer for the documents you can access._" }]);
     } catch (e: any) {
       setErr(e?.message || "Could not get an answer.");
@@ -80,8 +77,7 @@ export function AskPanel({
 
           {busy && (
             <div className="flex items-center gap-2 text-xs text-amgen-muted">
-              <Loader2 size={13} className="animate-spin" />
-              {web ? "Searching the web & reading the documents… (this takes a bit longer)" : "Reading the documents…"}
+              <Loader2 size={13} className="animate-spin" /> Reading the documents…
             </div>
           )}
           {err && <div className="text-xs text-red-600">{err}</div>}
@@ -94,18 +90,6 @@ export function AskPanel({
                 className="shrink-0 rounded-lg border border-amgen-line px-2.5 py-1.5 text-xs font-medium text-amgen-muted hover:border-amgen-blue/40 hover:text-amgen-blue disabled:opacity-50"
               >
                 {summarize.label}
-              </button>
-            )}
-            {allowWebSearch && (
-              <button
-                type="button"
-                onClick={() => setWeb((w) => !w)}
-                title="Augment the answer with Google Search (adds public web context)"
-                className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
-                  web ? "border-amgen-blue bg-amgen-blue text-white" : "border-amgen-line text-amgen-muted hover:border-amgen-blue/40 hover:text-amgen-blue"
-                }`}
-              >
-                <Globe size={12} /> Web
               </button>
             )}
             <form
@@ -126,12 +110,6 @@ export function AskPanel({
               </button>
             </form>
           </div>
-          {allowWebSearch && web && !busy && (
-            <p className="flex items-center gap-1 text-[11px] text-amgen-muted">
-              <Globe size={11} /> Web search is on — answers pull in public web results and take
-              longer (typically ~30–45s extra).
-            </p>
-          )}
         </div>
       )}
     </div>

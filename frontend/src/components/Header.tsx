@@ -2,34 +2,7 @@ import { useState } from "react";
 import { Search, X, Sparkles } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { PersonaSwitcher } from "./PersonaSwitcher";
-import type { AnswerModel, Persona } from "../types";
-
-/** Dropdown to pick which LLM summarizes/answers (server-controlled allowlist). */
-function ModelPicker({
-  models,
-  value,
-  onChange,
-}: {
-  models: AnswerModel[];
-  value?: string;
-  onChange: (id: string) => void;
-}) {
-  if (!models?.length) return null;
-  return (
-    <label className="hidden items-center gap-1 rounded-full border border-amgen-line px-2 py-1 text-xs text-amgen-muted md:inline-flex" title="Model used for AI answers">
-      <Sparkles size={12} className="text-amgen-blue" />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="max-w-[9rem] bg-transparent text-xs text-amgen-ink outline-none"
-      >
-        {models.map((m) => (
-          <option key={m.id} value={m.id}>{m.label}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
+import type { Persona } from "../types";
 
 /** Compact on/off switch for auto-generating the AI answer on each search. */
 function AiToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
@@ -64,9 +37,6 @@ export function Header({
   onHow,
   aiOn,
   onToggleAi,
-  models,
-  model,
-  onModel,
 }: {
   query: string;
   onSearch: (q: string) => void;
@@ -77,9 +47,6 @@ export function Header({
   onHow?: () => void;
   aiOn: boolean;
   onToggleAi: () => void;
-  models: AnswerModel[];
-  model?: string;
-  onModel: (id: string) => void;
 }) {
   const [q, setQ] = useState(query);
   const submit = (e: React.FormEvent) => {
@@ -108,7 +75,6 @@ export function Header({
           </button>
         </form>
         <AiToggle on={aiOn} onToggle={onToggleAi} />
-        {aiOn && <ModelPicker models={models} value={model} onChange={onModel} />}
         <button onClick={onHow} className="hidden whitespace-nowrap text-xs font-medium text-amgen-muted hover:text-amgen-blue lg:block">
           How it works
         </button>

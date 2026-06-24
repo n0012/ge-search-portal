@@ -38,9 +38,16 @@ variable "bucket_name" {
   description = "Corpus bucket name (no gs://). Defaults to <project>-ge-search-corpus."
 }
 
-variable "gemini_model" {
-  type    = string
-  default = "gemini-3.5-flash"
+variable "engine_id" {
+  type        = string
+  default     = "ge-search-app"
+  description = "Gemini Enterprise (Agentspace) app ID (app_type=APP_TYPE_INTRANET) over the data store. The app queries THIS engine's serving config for :search and its assistant for :streamAssist, so all traffic bills through the GE per-seat subscription (querying the data store directly bills standalone, SKU 93D6-7280-CF05). Must be a GE engine."
+}
+
+variable "assistant_id" {
+  type        = string
+  default     = "default_assistant"
+  description = "Assistant ID under the GE engine used for :streamAssist (auto-created with the GE app)."
 }
 
 variable "identity_source" {
@@ -54,18 +61,6 @@ variable "identity_source" {
     condition     = contains(["demo", "iap"], var.identity_source)
     error_message = "identity_source must be \"demo\" or \"iap\"."
   }
-}
-
-variable "multimodal_answers" {
-  type        = string
-  default     = "on"
-  description = "on = Gemini reads retrieved docs' PDF pages (charts/tables) at answer time."
-}
-
-variable "multimodal_model" {
-  type        = string
-  default     = "gemini-3.5-flash"
-  description = "Model for multimodal answers (GA, reads PDFs)."
 }
 
 variable "iap_members" {

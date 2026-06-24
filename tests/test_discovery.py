@@ -8,9 +8,10 @@ import discovery  # noqa: E402
 
 
 class _Resp:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, text=None):
         self._p = payload
         self.status_code = status_code
+        self.text = text if text is not None else json.dumps(payload)
 
     def json(self):
         return self._p
@@ -68,6 +69,80 @@ def test_answer_with_filter_empty_ids_noops(fake):
     assert summary == "" and docs == [] and fake.calls == []
 
 
+def test_search_requests_extractive_segments_when_enabled(fake, monkeypatch):
+    monkeypatch.setattr(discovery.config, "RERANK_EXTRACTIVE", True)
+    discovery.retrieve("q", 5)
+    spec = fake.calls[0]["body"]["contentSearchSpec"]
+    assert spec["extractiveContentSpec"]["maxExtractiveSegmentCount"] == 2
+    assert spec["extractiveContentSpec"]["returnExtractiveSegmentScore"] is True
+
+
+def test_search_omits_extractive_when_disabled(fake, monkeypatch):
+    monkeypatch.setattr(discovery.config, "RERANK_EXTRACTIVE", False)
+    discovery.retrieve("q", 5)
+    assert "extractiveContentSpec" not in fake.calls[0]["body"]["contentSearchSpec"]
+
+
+class _AssistSession:
+    """Returns a canned streamAssist payload (JSON array of events) + captures the body."""
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+        self.calls.append({"url": url, "body": json})
+        events = [{"answer": {"replies": [{"groundedContent": {
+            "content": {"parts": [{"text": "Grounded answer [1]."}]},
+            "textGroundingMetadata": {"references": [{
+                "content": "cited chunk text",
+                "documentMetadata": {
+                    "document": "projects/p/.../documents/d1",
+                    "uri": "https://x/d1.pdf", "title": "Doc One"},
+            }]},
+        }}]}}]
+        return _Resp(events)
+
+
+def test_assist_sets_streamassist_url_filter_and_maps_refs(monkeypatch):
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "ASSISTANT_PATH",
+                        "projects/p/locations/global/collections/default_collection/"
+                        "engines/ge-search-app/assistants/default_assistant")
+    text, docs = discovery.assist("q", ["a", "b"])
+    body = s.calls[0]["body"]
+    assert s.calls[0]["url"].endswith(":streamAssist")
+    assert "engines/ge-search-app/assistants/default_assistant" in s.calls[0]["url"]
+    assert body["query"]["text"] == "q"
+    assert body["toolsSpec"]["vertexAiSearchSpec"]["filter"] == 'id: ANY("a", "b")'
+    assert text == "Grounded answer [1]."
+    assert docs == [{"documentId": "d1", "title": "Doc One",
+                     "sourceUrl": "https://x/d1.pdf", "snippet": "cited chunk text"}]
+
+
+def test_assist_empty_ids_noops(monkeypatch):
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    text, docs = discovery.assist("q", [])
+    assert text == "" and docs == [] and s.calls == []
+
+
+def test_assist_parses_sse_data_lines(monkeypatch):
+    # tolerate SSE 'data:' framing as well as a JSON array
+    sse = ('data: {"answer":{"replies":[{"groundedContent":'
+           '{"content":{"parts":[{"text":"hello"}]}}}]}}\n')
+
+    class _SSE:
+        calls = []
+
+        def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+            _SSE.calls.append({"url": url, "body": json})
+            return _Resp(None, text=sse)
+
+    monkeypatch.setattr(discovery, "_session", _SSE())
+    text, docs = discovery.assist("q", ["a"])
+    assert text == "hello"
+
+
 class _FlakySession:
     """Fails the first N posts with the propagation 400, then succeeds."""
     def __init__(self, fail_times):
@@ -90,6 +165,29 @@ def test_search_retries_transient_unsupported_field(monkeypatch):
     monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)  # skip backoff
     docs, _ = discovery.retrieve("q", 5)
     assert s.calls == 3 and docs == []
+
+
+class _RankSession:
+    """Captures the ranking request and returns a reversed order."""
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+        self.calls.append({"url": url, "body": json})
+        n = len(json["records"])
+        return _Resp({"records": [{"id": str(i)} for i in reversed(range(n))]})
+
+
+def test_rerank_prefers_segment_over_snippet(monkeypatch):
+    s = _RankSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "RERANK", True)
+    docs = [{"title": "A", "snippet": "snip a", "segment": "rich a"},
+            {"title": "B", "snippet": "snip b"}]  # no segment -> falls back to snippet
+    discovery.rerank("q", docs)
+    records = s.calls[0]["body"]["records"]
+    assert records[0]["content"] == "rich a"
+    assert records[1]["content"] == "snip b"
 
 
 def test_write_user_event_posts_search_event(fake):

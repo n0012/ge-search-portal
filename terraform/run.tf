@@ -30,6 +30,16 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.data_store_id
       }
       env {
+        # GE engine: app queries its serving config (:search) + assistant (:streamAssist) so all
+        # traffic is covered by the GE subscription (not billed standalone).
+        name  = "ENGINE_ID"
+        value = google_discovery_engine_search_engine.engine.engine_id
+      }
+      env {
+        name  = "ASSISTANT_ID"
+        value = var.assistant_id
+      }
+      env {
         name  = "PERMISSION_BACKEND"
         value = "firestore"
       }
@@ -42,28 +52,12 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.identity_source
       }
       env {
-        name  = "ANSWER_MODE"
-        value = "gemini"
-      }
-      env {
-        name  = "GEMINI_MODEL"
-        value = var.gemini_model
-      }
-      env {
         name  = "BQ_LOGGING"
         value = "on"
       }
       env {
         name  = "BQ_DATASET"
         value = google_bigquery_dataset.logs.dataset_id
-      }
-      env {
-        name  = "MULTIMODAL_ANSWERS"
-        value = var.multimodal_answers
-      }
-      env {
-        name  = "MULTIMODAL_MODEL"
-        value = var.multimodal_model
       }
     }
   }
@@ -73,7 +67,8 @@ resource "google_cloud_run_v2_service" "app" {
     ignore_changes = [template[0].containers[0].image]
   }
 
-  depends_on = [google_project_service.apis, google_firestore_database.default]
+  depends_on = [google_project_service.apis, google_firestore_database.default,
+  google_discovery_engine_search_engine.engine]
 }
 
 # IAP service agent invokes the Cloud Run service on the authenticated user's behalf.
