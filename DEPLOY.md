@@ -5,6 +5,10 @@ Stand up the full demo in one command. Self-contained: this directory has everyt
 
 ## Prerequisites
 - A **GCP project** with **billing enabled** and you as **Owner** (or Editor + Project IAM Admin).
+- A **Gemini Enterprise subscription** in that project (answers come from the GE assistant, and
+  the whole point is subscription-covered billing). No seats yet? See
+  [Provision the GE subscription/license](#provision-the-ge-subscriptionlicense) below — a
+  30-day free trial can be provisioned entirely via API after the infra step.
 - Local tools: **`gcloud`**, **`terraform`** (≥1.5). (Node/Python are only needed for local dev —
   the deploy builds the image in Cloud Build, not on your machine.)
 - Authenticate once:
@@ -36,6 +40,41 @@ This runs three steps (override with `--steps infra,build,data`):
   populate a few minutes later.)
 
 When it finishes it prints the IAP-gated **Service URL**. Open it as an authorized user.
+
+## Provision the GE subscription/license
+
+The GE engine and its `default_assistant` are created by Terraform, but `:streamAssist` only
+serves once the project has an **ACTIVE licenseConfig**. Verified flow (works for the app's
+service account too — no per-SA seat needed, the project-level subscription is what matters):
+
+```bash
+P=YOUR_PROJECT_ID
+TOKEN=$(gcloud auth print-access-token)
+# 1. 30-day free trial (licenseConfigs.create is only allowed for free trials —
+#    paid tiers go through billing/procurement). startDate must be a FUTURE date,
+#    but the config comes back ACTIVE immediately.
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" \
+  -H "Content-Type: application/json" \
+  "https://discoveryengine.googleapis.com/v1alpha/projects/$P/locations/global/licenseConfigs?licenseConfigId=free_trial_gemini" \
+  -d '{"licenseCount": "50", "subscriptionTier": "SUBSCRIPTION_TIER_SEARCH_AND_ASSISTANT",
+       "subscriptionTerm": "SUBSCRIPTION_TERM_ONE_MONTH", "freeTrial": true,
+       "startDate": {"year": YYYY, "month": M, "day": TOMORROW}}'
+# 2. make it the user store default (auto-assigns seats on first login)
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" \
+  -H "Content-Type: application/json" \
+  "https://discoveryengine.googleapis.com/v1alpha/projects/$P/locations/global/userStores/default_user_store?updateMask=defaultLicenseConfig,enableLicenseAutoRegister" \
+  -d "{\"defaultLicenseConfig\": \"projects/$P/locations/global/licenseConfigs/free_trial_gemini\",
+       \"enableLicenseAutoRegister\": true}"
+# 3. (optional) pre-assign a seat to a human user via
+#    userStores/default_user_store:batchUpdateUserLicenses
+```
+
+Gotchas (all hit on a real fresh install):
+- `default_user_store` only exists **after** the GE engine is created — run the infra step first
+  (404 "User store ... does not exist" otherwise).
+- Without an active licenseConfig, assist calls fail with *"User must be assigned a license"*.
+- The trial expires after one month; check state with
+  `GET /v1alpha/projects/$P/locations/global/licenseConfigs`.
 
 ## 3. Verify
 ```bash
@@ -75,12 +114,31 @@ filters via their own `group_users` (so for real use you'd seed your actual user
   **engine you query**: calls to a **Gemini Enterprise engine's** serving config are covered by the
   per-seat GE subscription; calls to the **data store directly** (or a non-GE VAIS engine) bill
   standalone (SKU `93D6-7280-CF05`). So the app routes **both** `:search` and the assistant
-  (`:streamAssist`) at the GE engine. Terraform creates `google_discovery_engine_chat_engine.engine`
-  (`engine_id`, default `ge-search-app`) over the data store and sets `ENGINE_ID`/`ASSISTANT_ID` on
-  the Cloud Run service. **`ENGINE_ID` must be a genuine GE engine** — verify after deploy that no
-  `93D6-7280-CF05` charges accrue (see the billing check below). If a Terraform-created chat engine
-  isn't billed as GE, create the app in the Gemini Enterprise/Agentspace console and set `engine_id`
-  to it. Requires GE seats. IAM: the app SA's custom role adds `discoveryengine.assistants.assist`.
+  (`:streamAssist`) at the GE engine. Terraform creates
+  `google_discovery_engine_search_engine.engine` (`app_type = APP_TYPE_INTRANET`, `engine_id`
+  default `ge-search-app`) over the data store and sets `ENGINE_ID`/`ASSISTANT_ID` on the Cloud
+  Run service. **`ENGINE_ID` must be a genuine GE engine** — verify after deploy that no
+  `93D6-7280-CF05` charges accrue (see the billing check below). If a Terraform-created engine
+  isn't billed as GE, create the app in the Gemini Enterprise console and set `engine_id` to it.
+  Requires an active GE subscription (see the license section above). IAM: the app SA's custom
+  role adds `discoveryengine.assistants.assist`; the ingest SA gets a narrow
+  `discoveryengine.schemas.update` custom role (`roles/discoveryengine.editor` does NOT include
+  it, and ingest step 5 needs it to declare `acl_groups` filterable).
+- **Give the index ~an hour to settle on a fresh install.** After the first import (and after the
+  `acl_groups` schema change), the assistant's search tool is flaky: intermittent empty grounding,
+  "internal system error" answer text, and occasional empty `:search` responses for long
+  natural-language queries. This is (re)indexing propagation, not a config error — it settles as
+  indexing completes. `scripts/fix_schema.py` handles the related type gotcha automatically (once
+  docs are imported, auto-detection types `acl_groups` as an array and the type can't be altered).
+- **Assistant filter semantics (why the app filters the way it does).** At `:streamAssist`,
+  `toolsSpec.vertexAiSearchSpec.filter` with **indexed struct fields** (`acl_groups`, `company`,
+  AND-combos) is honored and enforced. `id: ANY(...)` is **not** filterable on a GE engine, and
+  `dataStoreSpecs[].filter` is silently **ignored** on single-data-store engines — don't rely on
+  either for security. Keyword-form queries are skipped (`NON_ASSIST_SEEKING_QUERY_IGNORED`);
+  the app wraps them in an explicit summarize ask.
+- **Domain-restricted-sharing orgs (e.g. Argolis):** `iap_members` must be identities the org
+  policy `iam.allowedPolicyMemberDomains` allows (in-directory). With no `terraform.tfvars`,
+  `deploy-all.sh` auto-grants the deploying gcloud account, which always satisfies DRS.
 - **Answers are text-grounded (no separate Gemini billing).** The GE assistant grounds on indexed
   text/extractive segments — it does not do vision over raw PDF page images. We deliberately do
   **not** make direct Vertex Gemini calls (which would bill separately per token, outside the

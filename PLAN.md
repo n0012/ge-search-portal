@@ -144,10 +144,13 @@ lookups. (No SQLite. A real **Mongo/DocumentDB adapter** is a documented future 
 2. **user → groups** via `group_users` (cache per request).
 3. **Retrieve-only** `:search`, `summarySpec` **disabled**, **over-fetch** (≈5× display) to survive trimming.
 4. **Trim:** one **batched** `document_groups` lookup for all returned `document_id`s; keep docs whose groups intersect the user's.
-5. **Generate ACL-safe answer** over only the authorized docs, via the **Gemini Enterprise engine
-   assistant** — `engines/{ENGINE_ID}/assistants/{ASSISTANT_ID}:streamAssist` with
-   `toolsSpec.vertexAiSearchSpec.filter: 'id: ANY("d1",…)'`. Managed query understanding +
-   retrieval + grounded generation + citations, server-side; the id filter keeps the ACL trim.
+5. **Generate ACL-safe answer** via the **Gemini Enterprise engine assistant** —
+   `engines/{ENGINE_ID}/assistants/{ASSISTANT_ID}:streamAssist` with
+   `toolsSpec.vertexAiSearchSpec.filter: 'acl_groups: ANY(<user groups>)'` (+ active facets).
+   Managed query understanding + retrieval + grounded generation + citations, server-side; the
+   acl_groups predicate — the same one the search trim uses — keeps the ACL trim. (The original
+   design used `id: ANY(<allowed ids>)`, but live verification showed `id` is not filterable on
+   a GE engine: `:search` rejects it and the assistant tool silently fails to ground.)
    The SSE stream is consumed and assembled server-side into `{summary, citations}`.
    **Billing:** because the call hits the **GE engine** (not the data store / a non-GE engine),
    it's covered by the per-seat GE subscription — the same reason `:search` (step 3) targets the

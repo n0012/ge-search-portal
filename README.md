@@ -29,8 +29,9 @@ full design rationale · [`INGEST.md`](./INGEST.md) — initial-load + **increme
 - 🧠 **Opt-in AI answer — Gemini Enterprise engine, subscription-covered** — search is
   LLM-free/fast by default; a header toggle + on-demand button generate a grounded, cited
   answer (`/api/answer`). Every answer is produced by the **Gemini Enterprise engine assistant**
-  (`:streamAssist` — query understanding, retrieval, grounded generation, inline citations), with
-  the authorized doc-id set passed as a filter so the ACL trim holds. The same path powers
+  (`:streamAssist` — query understanding, retrieval, grounded generation, inline citations),
+  scoped by the user's indexed `acl_groups` (+ facet) predicate so the ACL trim holds
+  (`id` is **not** a filterable field on a GE engine — see *Identity & access*). The same path powers
   **per-document Q&A / summarize** (`/api/doc/qa`) and **"Ask about these documents"** follow-up
   Q&A over the result set (`/api/ask`).
 - 💳 **All traffic billed through the GE subscription** — both `:search` and the assistant
@@ -60,7 +61,7 @@ Browser ─IAP─▶ React SPA ─/api─▶ FastAPI (app SA, read-only)        
                   │     ──────────────────────────────────▶ Vertex AI Search (server-side trim)│
                   │  3b. semantic re-rank the trimmed set ──▶ Ranking API (before results + AI) │
                   │  4. live re-verify the page vs Firestore (defense-in-depth)                 │
-                  │  5. /api/answer (opt-in): GE engine assistant (:streamAssist) over trimmed ids│
+                  │  5. /api/answer (opt-in): GE assistant (:streamAssist), acl_groups-scoped   │
                   │  6. /api/doc/{id}: ACL-checked signed URL to the imported GCS copy          │
                   │  7. log search/feedback ───────────────▶ BigQuery ge_search_logs.*          │
                   └────────────────────────────────────────────────────────────────────────────┘
@@ -99,10 +100,15 @@ in-app under **"How it works"**):
   immediately with no re-index. `backend/main._retrieve_trim` then re-verifies the returned
   page against live Firestore (`permissions.trim`) as defense-in-depth, so a stale
   `acl_groups` can never leak.
-- **Answer is ACL-safe.** `/api/answer`, `/api/ask`, and `/api/doc/qa` generate **only over the
-  ACL-trimmed set** (re-derived server-side), never the raw retrieved set. The GE engine assistant
-  (`:streamAssist`) is restricted to the authorized **doc-id set** via
-  `toolsSpec.vertexAiSearchSpec.filter` (`id: ANY(<allowed ids>)`).
+- **Answer is ACL-safe.** `/api/answer`, `/api/ask`, and `/api/doc/qa` re-derive the user's
+  authorization server-side and scope the GE engine assistant (`:streamAssist`) via
+  `toolsSpec.vertexAiSearchSpec.filter` with the **same indexed `acl_groups: ANY(<user groups>)`
+  (+ facet) predicate the search trim uses** — verified enforced (grounding refuses to cross it).
+  Two designs that look right but **don't** work on a GE engine (verified live, July 2026):
+  `id: ANY(<allowed ids>)` — `id` isn't a filterable field (`:search` rejects it; the assistant
+  tool silently returns no grounding) — and `dataStoreSpecs[].filter`, which is only honored on
+  multi-data-store engines (silently **ignored** on a single-store engine — a leak if relied on).
+  `discovery.assist()` therefore fails closed when no ACL filter is supplied.
 - **Data filters only narrow within the permitted set** — facets are computed over the
   ACL-filtered set, so chips never reveal hidden docs; cascading uses exclude-own-field.
 - **Imported-copy access is ACL-checked.** `/api/doc/{id}` verifies the user's groups before
@@ -184,9 +190,9 @@ hand-off zip, and gotchas: **[`DEPLOY.md`](./DEPLOY.md)**. Teardown: `cd terrafo
 | `GET /api/me` | resolved user + groups |
 | `GET /api/config` | data store id, identity source, personas, facet fields |
 | `POST /api/search` | `{query, facets?}` → `{results[], citations[], availableFilters, …}` — GE-engine `:search`, ACL-trimmed, **LLM-free** (fast) |
-| `POST /api/answer` | `{query, facets?}` → `{summary, citations[]}` — opt-in answer via the GE engine assistant (`:streamAssist`) over the same trimmed set |
-| `POST /api/ask` | `{query, facets?, question}` → `{answer, citations[]}` — GE-engine-assistant Q&A over the whole result set |
-| `POST /api/doc/qa` | `{documentId, question}` → `{answer}` — GE-engine-assistant Q&A / summarize grounded on ONE doc (ACL-checked) |
+| `POST /api/answer` | `{query, facets?}` → `{summary, citations[]}` — opt-in answer via the GE engine assistant (`:streamAssist`), ACL+facet-scoped (the keyword query is wrapped in a summarize ask — the assistant skips bare keywords as `NON_ASSIST_SEEKING_QUERY_IGNORED`) |
+| `POST /api/ask` | `{query, facets?, question}` → `{answer, citations[]}` — GE-engine-assistant Q&A, ACL+facet-scoped |
+| `POST /api/doc/qa` | `{documentId, question}` → `{answer}` — GE-engine-assistant Q&A / summarize, ACL-checked + ACL-scoped, steered to the doc by title (`id` isn't filterable, so exact single-doc pinning isn't possible server-side) |
 | `GET /api/doc/{id}` | 302 → short-lived **signed URL** for the imported GCS copy (ACL-checked; friendly HTML on deny/missing) |
 | `POST /api/feedback` | `{documentId, query, vote}` → logs to BigQuery + (up-vote) VAIS user event |
 

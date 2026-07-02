@@ -64,7 +64,7 @@
     <text x="832" y="205" font-size="15" class="num">5</text>
     <text x="832" y="228" class="t h">Opt-in AI answer</text>
     <text x="832" y="247" class="m">answer / ask /</text>
-    <text x="832" y="262" class="m">per-doc Q&amp;A (Gemini)</text>
+    <text x="832" y="262" class="m">per-doc Q&amp;A (GE assistant)</text>
   </g>
 
   <!-- backing services -->
@@ -79,8 +79,8 @@
     <text x="327" y="385" text-anchor="middle" class="w">index + acl_groups</text>
 
     <rect x="434" y="344" width="170" height="52" rx="10" fill="#92BE43"/>
-    <text x="519" y="368" text-anchor="middle" class="w h">Gemini</text>
-    <text x="519" y="385" text-anchor="middle" class="w">grounded answers</text>
+    <text x="519" y="368" text-anchor="middle" class="w h">GE assistant</text>
+    <text x="519" y="385" text-anchor="middle" class="w">:streamAssist answers</text>
 
     <rect x="616" y="344" width="190" height="52" rx="10" fill="#15909C"/>
     <text x="711" y="368" text-anchor="middle" class="w h">Cloud Storage</text>
@@ -95,6 +95,6 @@
   <rect x="40" y="430" width="960" height="92" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
   <text x="60" y="458" font-size="14" class="t h">Security model</text>
   <text x="60" y="480" font-size="12.5" class="m">• Results, facets and answers are limited to documents where acl_groups ∩ the user's live Firestore groups ≠ ∅ — enforced server-side in VAIS.</text>
-  <text x="60" y="499" font-size="12.5" class="m">• AI answers are generated ONLY over the ACL-trimmed set (re-derived server-side); a page-level Firestore re-check is the defense-in-depth net.</text>
-  <text x="60" y="518" font-size="12.5" class="m">• Membership changes are live (no re-index); every turn is logged to BigQuery with model, web-search flag, latency, and a search_id.</text>
+  <text x="60" y="499" font-size="12.5" class="m">• AI answers are scoped by the same server-enforced acl_groups predicate (re-derived per request); a page-level Firestore re-check is the defense-in-depth net.</text>
+  <text x="60" y="518" font-size="12.5" class="m">• Membership changes are live (no re-index); every turn is logged to BigQuery with latency, citations and a search_id.</text>
 </svg>
