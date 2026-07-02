@@ -44,8 +44,19 @@ When it finishes it prints the IAP-gated **Service URL**. Open it as an authoriz
 ## Provision the GE subscription/license
 
 The GE engine and its `default_assistant` are created by Terraform, but `:streamAssist` only
-serves once the project has an **ACTIVE licenseConfig**. Verified flow (works for the app's
-service account too — no per-SA seat needed, the project-level subscription is what matters):
+serves once the project has an **ACTIVE licenseConfig**. One command (after the infra step):
+
+```bash
+bash scripts/setup_ge_license.sh YOUR_PROJECT_ID you@your-domain.com
+```
+
+That provisions a **30-day free trial** (50 seats, Search + Assistant tier), wires it as the
+user store default with seat auto-register, and optionally pre-assigns the given user a seat.
+Paid tiers are purchased through Cloud Billing / the Gemini Enterprise console instead — the
+create API only permits free trials. It works for the app's service account too — no per-SA
+seat needed, the project-level subscription is what matters.
+
+<details><summary>What the script calls (reference)</summary>
 
 ```bash
 P=YOUR_PROJECT_ID
@@ -68,6 +79,8 @@ curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" 
 # 3. (optional) pre-assign a seat to a human user via
 #    userStores/default_user_store:batchUpdateUserLicenses
 ```
+
+</details>
 
 Gotchas (all hit on a real fresh install):
 - `default_user_store` only exists **after** the GE engine is created — run the infra step first
