@@ -86,6 +86,7 @@ in-app under **"How it works"**):
 |---|---|
 | [`arch-search.svg`](./frontend/public/diagrams/arch-search.svg) | Core search — ACL-safe, query-time flow |
 | [`arch-ai.svg`](./frontend/public/diagrams/arch-ai.svg) | AI answers — GE engine assistant (:streamAssist), opt-in, grounded, ACL-safe, subscription-covered |
+| [`arch-billing.svg`](./frontend/public/diagrams/arch-billing.svg) | Licensing & billing — how the per-seat GE subscription covers search + Q&A (and what would bill extra) |
 | [`arch-ingest.svg`](./frontend/public/diagrams/arch-ingest.svg) | Catalog & document-processing pipeline (layout parser → chunking → index; initial + incremental) |
 | [`arch-aws-sync.svg`](./frontend/public/diagrams/arch-aws-sync.svg) | Syncing with AWS DynamoDB via the Firestore catalog contract |
 | [`arch-logging.svg`](./frontend/public/diagrams/arch-logging.svg) | Logging, analytics & feedback (BigQuery + learn-to-rank loop) |
