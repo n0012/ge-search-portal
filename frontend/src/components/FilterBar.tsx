@@ -25,7 +25,12 @@ export function FilterBar({
   onToggle: (field: string, value: string) => void;
   onClear: () => void;
 }) {
-  const fields = Object.keys(LABELS).filter((f) => (available[f]?.length ?? 0) > 0);
+  // A field stays visible while it has ACTIVE selections even if the current result
+  // set has no values for it (e.g. a filter combo that matches nothing) — otherwise the
+  // card would unmount and the user would have no way to unselect the filter.
+  const fields = Object.keys(LABELS).filter(
+    (f) => (available[f]?.length ?? 0) > 0 || (selected[f]?.length ?? 0) > 0
+  );
   const activeCount = Object.values(selected).reduce((n, v) => n + v.length, 0);
   if (!fields.length) return null;
 
@@ -48,7 +53,14 @@ export function FilterBar({
             <span className="w-16 shrink-0 text-[11px] font-medium text-amgen-muted">
               {LABELS[field]}
             </span>
-            {available[field].map(({ value, count }) => {
+            {[
+              ...(available[field] ?? []),
+              // selected values missing from the current facet set still render (no
+              // count) so they can always be toggled off
+              ...(selected[field] ?? [])
+                .filter((v) => !(available[field] ?? []).some((a) => a.value === v))
+                .map((v) => ({ value: v, count: undefined as number | undefined })),
+            ].map(({ value, count }) => {
               const on = selected[field]?.includes(value);
               return (
                 <button
@@ -61,7 +73,9 @@ export function FilterBar({
                   }`}
                 >
                   {value}
-                  <span className={on ? "text-white/70" : "text-amgen-muted"}> {count}</span>
+                  {count != null && (
+                    <span className={on ? "text-white/70" : "text-amgen-muted"}> {count}</span>
+                  )}
                 </button>
               );
             })}

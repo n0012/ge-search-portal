@@ -169,12 +169,16 @@ class _FlakySession:
 
 
 def test_search_retries_transient_unsupported_field(monkeypatch):
-    # a just-declared filterable field still propagating should be retried, not surfaced
+    # a just-declared filterable field still propagating should be hedged/retried, not
+    # surfaced. FlakySession fails the first 2 draws -> wave 1 (2 attempts) all fail,
+    # wave 2 succeeds on its first completion; up to 5 total draws may have been fired.
     s = _FlakySession(2)
     monkeypatch.setattr(discovery, "_session", s)
     monkeypatch.setattr(discovery.config, "BOOST_RECENT_YEARS", "")
-    monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)  # skip backoff
+    monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)  # skip redraw pause
     docs, _ = discovery.retrieve("q", 5)
+    # instant fake responses -> failed draws trigger immediate redraws, no hedging:
+    # exactly 3 draws (2 transient failures + 1 success)
     assert s.calls == 3 and docs == []
 
 

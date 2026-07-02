@@ -12,7 +12,7 @@ retrieval AND summarization before anything else — independent of the ACL trim
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
@@ -76,32 +76,66 @@ def _search(query, page_size, summary=False, filter_="", facet_fields=None):
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
-def _post_with_retry(url, body, attempts=5):
-    """POST a :search with a small, fail-closed retry. Retries only transient cases —
-    server hiccups (5xx/429) and the window where a just-declared filterable field
-    (e.g. acl_groups after a schema change) is still propagating across serving replicas
-    and yields a 400 "Unsupported field". The filter itself is never weakened, so a retry
-    can't leak. Anything else raises immediately.
-
-    attempts=5: the propagation flap is per-replica (observed live: the same request
-    alternates 200/400 for an hour+ after a schema change), so each retry is a fresh
-    draw — 3 draws still 500'd through to the UI during that window; 5 makes it rare."""
-    last = None
-    for attempt in range(attempts):
-        r = _sess().post(url, json=body, timeout=60)
-        if r.status_code == 200:
-            return r.json()
-        msg = ""
+def _transient(r):
+    """Retry-eligible failures only: server hiccups (5xx/429) and the window where a
+    just-declared filterable field (e.g. acl_groups after a schema change) is still
+    propagating across serving replicas and yields a 400 "Unsupported field"."""
+    if r.status_code in _RETRYABLE_STATUS:
+        return True
+    if r.status_code == 400:
         try:
             msg = (r.json().get("error", {}) or {}).get("message", "")
         except Exception:
-            pass
-        transient = r.status_code in _RETRYABLE_STATUS or (
-            r.status_code == 400 and "Unsupported field" in msg)
-        last = r
-        if not transient or attempt == attempts - 1:
-            break
-        time.sleep(0.6 * (attempt + 1))
+            msg = ""
+        return "Unsupported field" in msg
+    return False
+
+
+def _post_with_retry(url, body, max_draws=5, hedge_after=1.2):
+    """POST a :search with STAGGERED-HEDGED attempts: fire one request; if it hasn't
+    answered within `hedge_after` seconds (or failed transiently), launch another
+    identical draw in parallel — first 200 wins, up to `max_draws` total.
+
+    Why hedging instead of serial retry+backoff: during (re)index propagation the
+    engine's serving replicas flap INDEPENDENTLY per request (observed live: ~35% of
+    identical calls 400/500, and 2-20s latencies, for hours), so serial retries made
+    users wait out several bad draws in a row — 12-25s searches. A hedged draw makes
+    latency ≈ the fastest good replica, while a healthy backend still costs exactly
+    one request. Queries at the GE engine are covered by the per-seat subscription,
+    so extra draws add no marginal cost. Only transient failures are hedged (anything
+    else raises immediately), and the filter is never weakened, so a draw can't leak.
+    Fail-closed: all draws exhausted -> raise."""
+    ex = ThreadPoolExecutor(max_workers=max_draws)
+    last = None
+    try:
+        pending = {ex.submit(_sess().post, url, json=body, timeout=60)}
+        draws = 1
+        while pending or draws < max_draws:
+            if not pending:  # every draw so far failed transiently — redraw
+                time.sleep(0.2)
+                pending.add(ex.submit(_sess().post, url, json=body, timeout=60))
+                draws += 1
+            done, pending = wait(pending, return_when=FIRST_COMPLETED,
+                                 timeout=hedge_after if draws < max_draws else None)
+            if not done and draws < max_draws:  # slow draw — hedge with a parallel one
+                pending.add(ex.submit(_sess().post, url, json=body, timeout=60))
+                draws += 1
+                continue
+            for f in done:
+                try:
+                    r = f.result()
+                except Exception:
+                    continue  # connection-level failure — another draw may still win
+                if r.status_code == 200:
+                    return r.json()
+                last = r
+                if not _transient(r):
+                    r.raise_for_status()
+    finally:
+        # don't wait for losing draws — they finish (or time out) in the background
+        ex.shutdown(wait=False, cancel_futures=True)
+    if last is None:
+        raise RuntimeError("engine search failed: no response from any attempt")
     last.raise_for_status()
     return last.json()
 

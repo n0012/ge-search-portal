@@ -141,7 +141,14 @@ def facets(request: Request, body: dict = Body(...)):
         return JSONResponse({"error": "empty query"}, status_code=400)
     user = _user(request)
     groups = permissions.groups_for_user(user)
-    return {"availableFilters": discovery.cascade_facets(query, sorted(groups), selected)}
+    # Fail-soft: the patch is cosmetic (chip counts) — a transient engine failure here
+    # must never surface as a 500; the UI just keeps the own-filtered counts.
+    try:
+        patch = discovery.cascade_facets(query, sorted(groups), selected)
+    except Exception as e:
+        print("facets patch skipped: %s: %s" % (type(e).__name__, str(e)[:160]), flush=True)
+        patch = {}
+    return {"availableFilters": patch}
 
 
 @app.post("/api/answer")
