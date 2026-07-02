@@ -18,7 +18,7 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -96,10 +96,9 @@ def _citations(docs):
 
 
 @app.post("/api/search")
-async def search(request: Request):
+def search(request: Request, body: dict = Body(...)):
     """Fast path: retrieve + ACL-trim + facets. No LLM — the AI answer is opt-in
     (toggle / on-demand button) and served separately by /api/answer."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     if not query:
         return JSONResponse({"error": "empty query"}, status_code=400)
@@ -126,10 +125,9 @@ async def search(request: Request):
 
 
 @app.post("/api/answer")
-async def answer(request: Request):
+def answer(request: Request, body: dict = Body(...)):
     """On-demand AI answer over the SAME ACL-trimmed set as /api/search (re-derived
     server-side so the trim is authoritative — never trusts client-sent docs)."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     if not query:
         return JSONResponse({"error": "empty query"}, status_code=400)
@@ -160,11 +158,10 @@ async def answer(request: Request):
 
 
 @app.post("/api/ask")
-async def ask(request: Request):
+def ask(request: Request, body: dict = Body(...)):
     """Free-form Q&A over the CURRENT result set: same ACL-trimmed docs as /api/search
     (re-derived server-side), answering the user's follow-up `question` rather than
     summarizing. Powers the 'Ask about these documents' box on the answer card."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     question = (body.get("question") or "").strip()
     if not query or not question:
@@ -208,10 +205,9 @@ def _doc_page(title, message, status):
 
 
 @app.post("/api/doc/qa")
-async def doc_qa(request: Request):
+def doc_qa(request: Request, body: dict = Body(...)):
     """Ask a question (or 'summarize') about ONE specific document. ACL-checked, and
     grounded only on that document (multimodal PDF read, or its extracted text)."""
-    body = await request.json()
     document_id = (body.get("documentId") or "").strip()
     question = (body.get("question") or "").strip()
     if not document_id or not question:
@@ -272,8 +268,7 @@ def doc(document_id: str, request: Request):
 
 
 @app.post("/api/feedback")
-async def feedback(request: Request):
-    body = await request.json()
+def feedback(request: Request, body: dict = Body(...)):
     user = _user(request)
     doc_id = body.get("documentId", "")
     bqlog.log_feedback(user, body.get("query", ""), doc_id, body.get("title", ""),
