@@ -10,6 +10,7 @@ A `filter` expression (built from UI facets) is applied SERVER-SIDE, so it scope
 retrieval AND summarization before anything else — independent of the ACL trim.
 """
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -75,12 +76,16 @@ def _search(query, page_size, summary=False, filter_="", facet_fields=None):
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
-def _post_with_retry(url, body, attempts=3):
+def _post_with_retry(url, body, attempts=5):
     """POST a :search with a small, fail-closed retry. Retries only transient cases —
-    server hiccups (5xx/429) and the brief window where a just-declared filterable field
+    server hiccups (5xx/429) and the window where a just-declared filterable field
     (e.g. acl_groups after a schema change) is still propagating across serving replicas
     and yields a 400 "Unsupported field". The filter itself is never weakened, so a retry
-    can't leak. Anything else raises immediately."""
+    can't leak. Anything else raises immediately.
+
+    attempts=5: the propagation flap is per-replica (observed live: the same request
+    alternates 200/400 for an hour+ after a schema change), so each retry is a fresh
+    draw — 3 draws still 500'd through to the UI during that window; 5 makes it rare."""
     last = None
     for attempt in range(attempts):
         r = _sess().post(url, json=body, timeout=60)
@@ -215,7 +220,11 @@ def write_user_event(event_type, query=None, document_ids=None, user_id=None):
     """Report an interaction event for VAIS autotuning (learn-to-rank).
 
     event_type: "search" | "view-item" (we map a result click to view-item).
-    Best-effort — never raises into the request path.
+    Best-effort — never raises into the request path, and fire-and-forget (a daemon
+    thread) so it never ADDS latency either: it posts to the same Discovery Engine
+    backend as search, so when serving is slow/churning a synchronous call here
+    doubled the user-visible latency (up to its full timeout). Losing an occasional
+    advisory autotuning signal is fine; returns the Thread for tests to join.
     cf. record_user_events.ipynb.
     """
     event = {
@@ -229,10 +238,16 @@ def write_user_event(event_type, query=None, document_ids=None, user_id=None):
     url = (f"https://{config.DE_HOST}/v1/projects/{config.PROJECT_ID}/locations/"
            f"{config.LOCATION}/collections/default_collection/dataStores/"
            f"{config.DATA_STORE_ID}/userEvents:write")
-    try:
-        _sess().post(url, json=event, timeout=15)
-    except Exception:
-        pass
+
+    def _post():
+        try:
+            _sess().post(url, json=event, timeout=15)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_post, daemon=True)
+    t.start()
+    return t
 
 
 def get_document(document_id):

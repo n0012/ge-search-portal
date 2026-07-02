@@ -202,7 +202,8 @@ def test_rerank_prefers_segment_over_snippet(monkeypatch):
 
 
 def test_write_user_event_posts_search_event(fake):
-    discovery.write_user_event("search", query="q", document_ids=["d1"], user_id="u@x")
+    t = discovery.write_user_event("search", query="q", document_ids=["d1"], user_id="u@x")
+    t.join(timeout=5)  # fire-and-forget in prod; deterministic in tests
     call = fake.calls[0]
     assert call["url"].endswith("userEvents:write")
     assert call["body"]["eventType"] == "search"
