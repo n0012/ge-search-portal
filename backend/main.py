@@ -146,7 +146,10 @@ async def answer(request: Request):
     # trimmed result set.
     allowed_ids = [d["documentId"] for d in allowed]
     acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
-    summary, refs = discovery.assist(query, allowed_ids, acl_filter)
+    # Search queries are usually keywords, which the assistant declines as
+    # NON_ASSIST_SEEKING_QUERY_IGNORED — wrap them in an explicit summarization ask.
+    summary_q = "Summarize, with specifics, what the accessible documents say about: %s" % query
+    summary, refs = discovery.assist(summary_q, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
 
     bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),

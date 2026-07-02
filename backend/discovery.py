@@ -341,9 +341,10 @@ def assist(query, doc_ids, base_filter=""):
     except Exception as e:
         print("assist skipped: %s: %s" % (type(e).__name__, str(e)[:200]), flush=True)
         return "", []
-    parts, refs = [], []
+    parts, refs, skipped = [], [], []
     for ev in events:
         ans = ev.get("answer", {}) or {}
+        skipped.extend(ans.get("assistSkippedReasons") or [])
         for reply in ans.get("replies", []) or []:
             gc = reply.get("groundedContent", {}) or {}
             # AssistantContent carries the text directly (`content.text`), not a Gemini-style
@@ -355,6 +356,7 @@ def assist(query, doc_ids, base_filter=""):
             refs.extend(tgm.get("references", []) or [])
     text = "".join(parts)
     docs = _assist_refs_to_docs(refs)
-    print("assist ok: ids=%d events=%d refs=%d chars=%d" % (
-        len(doc_ids), len(events), len(docs), len(text)), flush=True)
+    print("assist ok: ids=%d events=%d refs=%d chars=%d%s" % (
+        len(doc_ids), len(events), len(docs), len(text),
+        (" skipped=" + ",".join(skipped)) if skipped else ""), flush=True)
     return text, docs
