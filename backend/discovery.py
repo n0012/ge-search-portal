@@ -316,17 +316,24 @@ def _parse_assist_stream(text):
 
 
 def assist(query, doc_ids, base_filter=""):
-    """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), restricted to
-    the authorized doc ids. Querying the GE engine keeps the call covered by the GE subscription
-    (vs. the data store / a non-GE engine, which bill standalone). The SSE stream is consumed and
-    assembled into a single (answerText, citation_docs). Best-effort: errors -> ("", [])."""
-    if not doc_ids:
+    """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), scoped by
+    base_filter — the caller's ACL(+facet) predicate, e.g. 'acl_groups: ANY("finance")'.
+    Querying the GE engine keeps the call covered by the GE subscription (vs. the data
+    store / a non-GE engine, which bill standalone). The SSE stream is consumed and
+    assembled into a single (answerText, citation_docs). Best-effort: errors -> ("", []).
+
+    doc_ids is the ACL-trimmed result page and acts only as the anything-to-answer guard
+    (callers also use it for citation fallback). It is NOT sent as a filter: `id` is not a
+    filterable field on a GE engine — the engine's :search parser rejects it outright and
+    the assistant's search tool silently fails to ground (verified against a live
+    GE-licensed engine). Per-user isolation instead rides the same indexed acl_groups
+    predicate the search trim uses, which the assistant tool honors and enforces.
+    Fail-closed: no docs or no filter -> no call."""
+    if not doc_ids or not base_filter:
         return "", []
-    id_filter = "id: ANY(" + ", ".join('"%s"' % i for i in doc_ids) + ")"
-    filter_ = f"({base_filter}) AND ({id_filter})" if base_filter else id_filter
     url = f"https://{config.DE_HOST}/v1/{config.ASSISTANT_PATH}:streamAssist"
     body = {"query": {"text": query},
-            "toolsSpec": {"vertexAiSearchSpec": {"filter": filter_}}}
+            "toolsSpec": {"vertexAiSearchSpec": {"filter": base_filter}}}
     try:
         r = _sess().post(url, json=body, timeout=120)
         r.raise_for_status()

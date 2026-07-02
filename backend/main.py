@@ -138,11 +138,15 @@ async def answer(request: Request):
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
     t0 = time.monotonic()
 
-    # Grounded answer via the GE engine assistant (:streamAssist), restricted to the authorized
-    # doc ids — covered by the GE subscription and ACL-safe. Surface its grounded references as
-    # citations when present, else fall back to the trimmed result set.
+    # Grounded answer via the GE engine assistant (:streamAssist), scoped to the user's ACL
+    # groups + active facet filters (the same enforced predicate as search — `id` is not
+    # filterable on a GE engine, so the assistant grounds over the user's accessible slice
+    # rather than the exact result page). Covered by the GE subscription and ACL-safe.
+    # Surface its grounded references as citations when present, else fall back to the
+    # trimmed result set.
     allowed_ids = [d["documentId"] for d in allowed]
-    summary, refs = discovery.assist(query, allowed_ids)
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
+    summary, refs = discovery.assist(query, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
 
     bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),
@@ -166,9 +170,11 @@ async def ask(request: Request):
     user = _user(request)
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
     t0 = time.monotonic()
-    # Follow-up Q&A grounded via the GE engine assistant over ONLY the authorized docs.
+    # Follow-up Q&A grounded via the GE engine assistant, scoped to the user's ACL groups
+    # + active facet filters (same enforced predicate as the search trim).
     allowed_ids = [d["documentId"] for d in allowed]
-    answer_text, refs = discovery.assist(question, allowed_ids)
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
+    answer_text, refs = discovery.assist(question, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
     discovery.write_user_event("search", query=question,
                                document_ids=allowed_ids, user_id=user)
@@ -218,8 +224,14 @@ async def doc_qa(request: Request):
         return JSONResponse({"error": "document not found"}, status_code=404)
 
     t0 = time.monotonic()
-    # Grounded on ONLY this document, via the GE engine assistant (covered + ACL-safe).
-    answer_text, _ = discovery.assist(question, [document_id])
+    # Grounded via the GE engine assistant within the user's ACL scope, steered to THIS
+    # document by naming its title in the query (`id` is not filterable on a GE engine, so
+    # exact single-doc pinning isn't possible server-side; the ACL predicate still bounds
+    # what can ground). Covered by the GE subscription and ACL-safe.
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups)})
+    doc_q = 'Using the document titled "%s", answer: %s' % (meta.get("title") or document_id,
+                                                            question)
+    answer_text, _ = discovery.assist(doc_q, [document_id], acl_filter)
 
     discovery.write_user_event("view-item", query=question,
                                document_ids=[document_id], user_id=user)

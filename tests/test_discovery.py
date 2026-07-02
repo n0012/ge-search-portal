@@ -108,12 +108,15 @@ def test_assist_sets_streamassist_url_filter_and_maps_refs(monkeypatch):
     monkeypatch.setattr(discovery.config, "ASSISTANT_PATH",
                         "projects/p/locations/global/collections/default_collection/"
                         "engines/ge-search-app/assistants/default_assistant")
-    text, docs = discovery.assist("q", ["a", "b"])
+    text, docs = discovery.assist("q", ["a", "b"], 'acl_groups: ANY("finance")')
     body = s.calls[0]["body"]
     assert s.calls[0]["url"].endswith(":streamAssist")
     assert "engines/ge-search-app/assistants/default_assistant" in s.calls[0]["url"]
     assert body["query"]["text"] == "q"
-    assert body["toolsSpec"]["vertexAiSearchSpec"]["filter"] == 'id: ANY("a", "b")'
+    # the ACL predicate is the filter — doc ids are NOT sent (id isn't filterable on a
+    # GE engine; the assistant's search tool fails to ground on it)
+    assert body["toolsSpec"]["vertexAiSearchSpec"]["filter"] == 'acl_groups: ANY("finance")'
+    assert "id: ANY" not in body["toolsSpec"]["vertexAiSearchSpec"]["filter"]
     assert text == "Grounded answer [1]."
     assert docs == [{"documentId": "d1", "title": "Doc One",
                      "sourceUrl": "https://x/d1.pdf", "snippet": "cited chunk text"}]
@@ -122,7 +125,15 @@ def test_assist_sets_streamassist_url_filter_and_maps_refs(monkeypatch):
 def test_assist_empty_ids_noops(monkeypatch):
     s = _AssistSession()
     monkeypatch.setattr(discovery, "_session", s)
-    text, docs = discovery.assist("q", [])
+    text, docs = discovery.assist("q", [], 'acl_groups: ANY("finance")')
+    assert text == "" and docs == [] and s.calls == []
+
+
+def test_assist_no_filter_fails_closed(monkeypatch):
+    # without an ACL predicate the assistant would search the WHOLE store — never call
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    text, docs = discovery.assist("q", ["a"])
     assert text == "" and docs == [] and s.calls == []
 
 
@@ -139,7 +150,7 @@ def test_assist_parses_sse_data_lines(monkeypatch):
             return _Resp(None, text=sse)
 
     monkeypatch.setattr(discovery, "_session", _SSE())
-    text, docs = discovery.assist("q", ["a"])
+    text, docs = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
     assert text == "hello"
 
 
