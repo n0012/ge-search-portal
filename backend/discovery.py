@@ -177,7 +177,7 @@ def rerank(query, docs, top_n=None):
     return out
 
 
-def search_faceted(query, page_size, group_ids, selected):
+def search_faceted(query, page_size, group_ids, selected, cascade=True):
     """Server-side ACL trim + cascading facets in one shot. Returns (docs, facets).
 
     The security trim is enforced by VAIS via the indexed `acl_groups` field
@@ -185,6 +185,11 @@ def search_faceted(query, page_size, group_ids, selected):
     sampling. Cascade is exclude-own-field: a field's own selection is dropped when
     computing ITS facet, so siblings stay visible (true multi-select), while every other
     facet reflects the full current selection.
+
+    cascade=False skips the per-active-field recompute (an extra engine query per active
+    filter) and returns after the single base call — active fields' facet values are then
+    own-filtered until the caller patches them via cascade_facets() (how /api/search +
+    /api/facets split the work so a filter click renders results immediately).
 
     group_ids: the user's live Firestore groups. selected: {field: [values]} UI filters.
     """
@@ -200,20 +205,32 @@ def search_faceted(query, page_size, group_ids, selected):
     docs = [_doc(r) for r in base.get("results", [])]
     docs = rerank(query, docs)[:page_size]  # semantic re-rank BEFORE results/AI see them
 
-    # recompute each actively-filtered field's facet WITHOUT its own filter (parallel;
-    # usually 0-2 fields). Base call already cascaded the rest.
-    active = [f for f in selected if f in FACET_FIELDS]
-    if active:
-        def own_excluded(field):
-            f = build_filter({**acl, **{k: v for k, v in selected.items() if k != field}})
-            return field, _facets(_search(query, 1, filter_=f, facet_fields=[field])).get(field, [])
-        with ThreadPoolExecutor(max_workers=min(4, len(active))) as ex:
-            for field, vals in ex.map(own_excluded, active):
-                if vals:
-                    facets[field] = vals
-                else:
-                    facets.pop(field, None)
+    if cascade:
+        for field, vals in cascade_facets(query, group_ids, selected).items():
+            if vals:
+                facets[field] = vals
+            else:
+                facets.pop(field, None)
     return docs, facets
+
+
+def cascade_facets(query, group_ids, selected):
+    """Recompute each actively-filtered field's facet WITHOUT its own filter (parallel;
+    usually 0-2 fields) so sibling values stay visible for multi-select. The base search
+    already cascades every non-active field. Returns {field: [{value, count}, ...]},
+    with [] when a field matches nothing (caller drops the chip group). Same ACL scope
+    as search, so counts can never reveal hidden docs."""
+    active = [f for f in selected if f in FACET_FIELDS]
+    if not group_ids or not active:
+        return {}
+    acl = {"acl_groups": sorted(group_ids)}
+
+    def own_excluded(field):
+        f = build_filter({**acl, **{k: v for k, v in selected.items() if k != field}})
+        return field, _facets(_search(query, 1, filter_=f, facet_fields=[field])).get(field, [])
+
+    with ThreadPoolExecutor(max_workers=min(4, len(active))) as ex:
+        return dict(ex.map(own_excluded, active))
 
 
 def write_user_event(event_type, query=None, document_ids=None, user_id=None):

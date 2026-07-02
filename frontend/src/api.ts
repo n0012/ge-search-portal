@@ -27,6 +27,23 @@ export async function search(
   return r.json();
 }
 
+// Deferred facet cascade: /api/search returns results immediately; this fetches the
+// own-excluded recount for the ACTIVELY-filtered fields, which the UI merges into
+// availableFilters (a field mapped to [] means: drop that chip group).
+export async function fetchFacetPatch(
+  query: string,
+  facets: Record<string, string[]>,
+  user?: string
+): Promise<SearchResponse["availableFilters"]> {
+  const r = await fetch("/api/facets", {
+    method: "POST",
+    headers: headers(user),
+    body: JSON.stringify({ query, facets }),
+  });
+  if (!r.ok) throw new Error("facets failed");
+  return (await r.json())?.availableFilters ?? {};
+}
+
 // Opt-in AI answer over the same ACL-trimmed set (re-derived server-side).
 export async function generateAnswer(
   query: string,

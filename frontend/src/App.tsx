@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
-import { getConfig, search, generateAnswer, askDocs, sendFeedback } from "./api";
+import { getConfig, search, fetchFacetPatch, generateAnswer, askDocs, sendFeedback } from "./api";
 import type { AppConfig, Citation, FacetValue, Persona, SearchResponse, SearchResult } from "./types";
 
 interface AnswerState {
@@ -54,15 +54,38 @@ export default function App() {
     }
   }
 
+  // Guards the deferred facet patch against out-of-order arrival: each run() bumps the
+  // sequence, and a patch only applies if no newer search superseded it meanwhile.
+  const facetSeq = useRef(0);
+
   async function run(q: string, facets: Record<string, string[]>) {
     setLoading(true);
     setError("");
     setAns(EMPTY_ANSWER); // new result set → clear any prior answer
+    const seq = ++facetSeq.current;
     try {
       const r = await search(q, facets, persona?.email);
       setResp(r);
       setSearchId(r.searchId);
       setAvailable(r.availableFilters || {});
+      // Results render immediately; the own-excluded recount for ACTIVE filter fields
+      // (which keeps sibling chips pickable for multi-select) arrives as a second,
+      // non-blocking patch. No active filters → nothing to patch.
+      if (Object.values(facets).some((v) => v && v.length)) {
+        fetchFacetPatch(q, facets, persona?.email)
+          .then((patch) => {
+            if (seq !== facetSeq.current) return; // a newer search superseded this patch
+            setAvailable((prev) => {
+              const next = { ...prev };
+              for (const [field, vals] of Object.entries(patch || {})) {
+                if (vals && vals.length) next[field] = vals;
+                else delete next[field];
+              }
+              return next;
+            });
+          })
+          .catch(() => {}); // cosmetic only — chips keep the own-filtered counts
+      }
       if (aiOn) generate(q, facets, r.searchId); // auto-generate only when the toggle is on
     } catch (e: any) {
       setError(e?.message || "search failed");

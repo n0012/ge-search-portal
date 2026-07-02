@@ -76,16 +76,21 @@ def _parse_query(body):
 
 
 def _retrieve_trim(query, page_size, selected, user):
-    """Shared retrieval + security trim for /api/search and /api/answer.
+    """Shared retrieval + security trim for /api/search and the AI endpoints.
 
     Returns (groups, available_facets, allowed_docs). The ACL trim and faceting run
     SERVER-SIDE in VAIS via the indexed acl_groups field (scales to any corpus size;
     facets cascade exactly). As defense-in-depth we re-verify the returned page against
     the LIVE Firestore graph — so a doc whose acl_groups drifted out of date is still
     dropped (O(page_size), one Firestore 'in' query).
+
+    Always cascade=False: the own-excluded recompute for active filter fields costs an
+    extra engine query per field, the AI endpoints ignore facets entirely, and
+    /api/search returns immediately while the UI patches chip counts via /api/facets.
     """
     groups = permissions.groups_for_user(user)
-    allowed, available = discovery.search_faceted(query, page_size, sorted(groups), selected)
+    allowed, available = discovery.search_faceted(query, page_size, sorted(groups),
+                                                  selected, cascade=False)
     allowed = permissions.trim(allowed, groups)
     return groups, available, allowed
 
@@ -122,6 +127,21 @@ def search(request: Request, body: dict = Body(...)):
         # counts never reveal documents the user can't see (dynamic + leak-safe).
         "availableFilters": available,
     }
+
+
+@app.post("/api/facets")
+def facets(request: Request, body: dict = Body(...)):
+    """Deferred facet cascade for the ACTIVELY-filtered fields (own-filter excluded, so
+    sibling values stay pickable for multi-select). /api/search intentionally skips this
+    recompute to render results immediately; the UI calls here right after and merges the
+    patch into availableFilters (a field mapped to [] means: drop that chip group).
+    Same ACL scope as search — counts never reveal documents the user can't see."""
+    query, _, selected = _parse_query(body)
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+    user = _user(request)
+    groups = permissions.groups_for_user(user)
+    return {"availableFilters": discovery.cascade_facets(query, sorted(groups), selected)}
 
 
 @app.post("/api/answer")

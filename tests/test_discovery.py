@@ -209,3 +209,33 @@ def test_write_user_event_posts_search_event(fake):
     assert call["body"]["eventType"] == "search"
     assert call["body"]["searchInfo"]["searchQuery"] == "q"
     assert call["body"]["documents"] == [{"id": "d1"}]
+
+
+def test_search_faceted_no_cascade_single_call(fake, monkeypatch):
+    # cascade=False must return after ONE engine call even with active filters —
+    # /api/search's fast path; /api/facets patches the active fields separately.
+    monkeypatch.setattr(discovery.config, "RERANK", False)
+    docs, facets = discovery.search_faceted("q", 5, ["finance"], {"year": ["2024"]},
+                                            cascade=False)
+    assert len(fake.calls) == 1
+    assert 'acl_groups: ANY("finance")' in fake.calls[0]["body"]["filter"]
+    assert 'year: ANY("2024")' in fake.calls[0]["body"]["filter"]
+
+
+def test_cascade_facets_excludes_own_filter(fake):
+    # each ACTIVE field is recomputed WITHOUT its own filter (siblings stay pickable),
+    # while every other selection + the ACL predicate stay applied
+    discovery.cascade_facets("q", ["finance"], {"year": ["2024"], "doc_type": ["10-K"]})
+    assert len(fake.calls) == 2
+    by_field = {c["body"]["facetSpecs"][0]["facetKey"]["key"]: c["body"]["filter"]
+                for c in fake.calls}
+    assert "year:" not in by_field["year"] and 'doc_type: ANY("10-K")' in by_field["year"]
+    assert "doc_type:" not in by_field["doc_type"] and 'year: ANY("2024")' in by_field["doc_type"]
+    for f in by_field.values():
+        assert 'acl_groups: ANY("finance")' in f
+
+
+def test_cascade_facets_noop_without_active_or_groups(fake):
+    assert discovery.cascade_facets("q", ["finance"], {}) == {}
+    assert discovery.cascade_facets("q", [], {"year": ["2024"]}) == {}
+    assert fake.calls == []
