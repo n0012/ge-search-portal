@@ -91,7 +91,7 @@ class _AssistSession:
     def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
         self.calls.append({"url": url, "body": json})
         events = [{"answer": {"replies": [{"groundedContent": {
-            "content": {"parts": [{"text": "Grounded answer [1]."}]},
+            "content": {"role": "model", "text": "Grounded answer [1]."},
             "textGroundingMetadata": {"references": [{
                 "content": "cited chunk text",
                 "documentMetadata": {
@@ -129,7 +129,7 @@ def test_assist_empty_ids_noops(monkeypatch):
 def test_assist_parses_sse_data_lines(monkeypatch):
     # tolerate SSE 'data:' framing as well as a JSON array
     sse = ('data: {"answer":{"replies":[{"groundedContent":'
-           '{"content":{"parts":[{"text":"hello"}]}}}]}}\n')
+           '{"content":{"role":"model","text":"hello"}}}]}}\n')
 
     class _SSE:
         calls = []

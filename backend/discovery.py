@@ -339,9 +339,11 @@ def assist(query, doc_ids, base_filter=""):
         ans = ev.get("answer", {}) or {}
         for reply in ans.get("replies", []) or []:
             gc = reply.get("groundedContent", {}) or {}
-            for p in (gc.get("content", {}) or {}).get("parts", []) or []:
-                if p.get("text"):
-                    parts.append(p["text"])
+            # AssistantContent carries the text directly (`content.text`), not a Gemini-style
+            # `parts[]`; `thought: true` chunks are model reasoning, not answer text.
+            content = gc.get("content", {}) or {}
+            if content.get("text") and not content.get("thought"):
+                parts.append(content["text"])
             tgm = gc.get("textGroundingMetadata", {}) or {}
             refs.extend(tgm.get("references", []) or [])
     text = "".join(parts)
