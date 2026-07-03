@@ -7,11 +7,11 @@
 #
 # Usage:
 #   bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data]
-#                      [--billing-export] [--logging-export] [--rerank]
+#                      [--billing-export] [--logging-export] [--rerank] [--warm]
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data] [--billing-export] [--logging-export] [--rerank]}"
+PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data] [--billing-export] [--logging-export] [--rerank] [--warm]}"
 shift || true
 REGION="us-central1"
 STEPS="infra,build,data"
@@ -22,6 +22,7 @@ while [ $# -gt 0 ]; do
     --billing-export) EXPORT_VARS+=(-var="enable_billing_export=true"); shift;;
     --logging-export) EXPORT_VARS+=(-var="enable_logging_export=true"); shift;;
     --rerank)         EXPORT_VARS+=(-var="enable_rerank=true"); shift;;
+    --warm)           EXPORT_VARS+=(-var="min_instances=1"); shift;;
     *)                REGION="$1"; shift;;
   esac
 done

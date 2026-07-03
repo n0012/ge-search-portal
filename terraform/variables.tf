@@ -120,3 +120,9 @@ variable "enable_rerank" {
   default     = false
   description = "Turn on the standalone cross-encoder Ranking API (RERANK=on) for sharper ordering + visible relevance scores. Adds per-search opex outside the GE subscription (SKU 93D6-7280-CF05) — track via the billing export. deploy-all.sh flag: --rerank."
 }
+
+variable "min_instances" {
+  type        = number
+  default     = 0
+  description = "Min warm Cloud Run instances for the app service. 0 = scale to zero (cheapest; cold-starts on deploy/idle). 1 = always warm (no cold-start blips, small always-on cost). deploy-all.sh flag: --warm."
+}

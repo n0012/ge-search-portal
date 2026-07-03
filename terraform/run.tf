@@ -9,6 +9,12 @@ resource "google_cloud_run_v2_service" "app" {
 
   template {
     service_account = google_service_account.app.email
+    # min_instances=1 keeps one warm instance so deploys/idle don't cold-start (removes the
+    # ~10s first-hit latency and empty-during-rollout blips). Costs one always-on instance;
+    # default 0 keeps net-new installs scale-to-zero cheap. deploy-all.sh flag: --warm.
+    scaling {
+      min_instance_count = var.min_instances
+    }
     containers {
       image = local.placeholder_image
       ports { container_port = 8080 }
