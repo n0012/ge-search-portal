@@ -7,17 +7,21 @@
 #
 # Usage:
 #   bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data]
+#                      [--billing-export] [--logging-export]
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data]}"
+PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data] [--billing-export] [--logging-export]}"
 shift || true
 REGION="us-central1"
 STEPS="infra,build,data"
+EXPORT_VARS=()   # optional analytics exports (see terraform/exports.tf)
 while [ $# -gt 0 ]; do
   case "$1" in
-    --steps) STEPS="$2"; shift 2;;
-    *)       REGION="$1"; shift;;
+    --steps)          STEPS="$2"; shift 2;;
+    --billing-export) EXPORT_VARS+=(-var="enable_billing_export=true"); shift;;
+    --logging-export) EXPORT_VARS+=(-var="enable_logging_export=true"); shift;;
+    *)                REGION="$1"; shift;;
   esac
 done
 has() { case ",${STEPS}," in *",$1,"*) return 0;; *) return 1;; esac; }
@@ -64,10 +68,12 @@ if has infra; then
     # minute behind enablement, 403-ing the first apply mid-run. One retry after a
     # pause completes cleanly (apply is idempotent).
     terraform apply -auto-approve -input=false \
-      -var="project_id=${PROJECT_ID}" -var="region=${REGION}" ${IAP_VAR[@]+"${IAP_VAR[@]}"} \
+      -var="project_id=${PROJECT_ID}" -var="region=${REGION}" \
+      ${IAP_VAR[@]+"${IAP_VAR[@]}"} ${EXPORT_VARS[@]+"${EXPORT_VARS[@]}"} \
     || { echo "   first apply hit API-enablement propagation — retrying in 60s"; sleep 60
          terraform apply -auto-approve -input=false \
-           -var="project_id=${PROJECT_ID}" -var="region=${REGION}" ${IAP_VAR[@]+"${IAP_VAR[@]}"}; } )
+           -var="project_id=${PROJECT_ID}" -var="region=${REGION}" \
+           ${IAP_VAR[@]+"${IAP_VAR[@]}"} ${EXPORT_VARS[@]+"${EXPORT_VARS[@]}"}; } )
   echo
   echo "   NOTE: :streamAssist needs an ACTIVE Gemini Enterprise licenseConfig in this"
   echo "   project. No subscription yet? Run: bash scripts/setup_ge_license.sh ${PROJECT_ID}"

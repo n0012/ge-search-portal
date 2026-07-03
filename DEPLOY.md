@@ -89,6 +89,21 @@ Gotchas (all hit on a real fresh install):
 - The trial expires after one month; check state with
   `GET /v1alpha/projects/$P/locations/global/licenseConfigs`.
 
+## Optional: analytics exports to BigQuery
+
+Both are off by default and flag-gated on the infra step (idempotent — re-run anytime):
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --billing-export --logging-export
+```
+- `--billing-export` — provisions dataset `billing_export` + the billing service-agent
+  grant, so per-SKU cost is queryable (e.g. prove **no** standalone Vertex AI Search SKU
+  `93D6-7280-CF05` accrues). **One-time Console step remains** (Google exposes no API for
+  it): Billing → Billing export → BigQuery export → *Detailed usage cost* → Edit settings
+  → this project + `billing_export`. Export starts from enablement; it does not backfill.
+- `--logging-export` — fully automated: a Cloud Logging sink streams the Cloud Run
+  service + job logs into dataset `ge_search_app_logs` (date-partitioned tables per log
+  stream) for SQL over latency, errors, assist events, and ingest runs.
+
 ## 3. Verify
 ```bash
 bash scripts/postdeploy_check.sh YOUR_PROJECT_ID

@@ -102,3 +102,15 @@ variable "reconcile_schedule" {
   default     = "8,23,38,53 * * * *" # every 15 min, offset off :00 to avoid fleet spikes
   description = "Cron schedule (UTC) for the incremental reconcile job."
 }
+
+variable "enable_billing_export" {
+  type        = bool
+  default     = false
+  description = "Provision a BigQuery dataset (+ billing service-agent grant) for the Cloud Billing per-SKU export. Pointing the billing account at it is a one-time Console step (no API). deploy-all.sh flag: --billing-export."
+}
+
+variable "enable_logging_export" {
+  type        = bool
+  default     = false
+  description = "Create a Cloud Logging sink streaming the app's Cloud Run service/job logs into a partitioned BigQuery dataset. deploy-all.sh flag: --logging-export."
+}
