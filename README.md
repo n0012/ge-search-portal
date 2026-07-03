@@ -17,7 +17,7 @@ full design rationale · [`INGEST.md`](./INGEST.md) — initial-load + **increme
 
 ## Features
 - 🔍 **VAIS retrieval** over a data store's serving config (no separate GE *app* needed),
-  with query expansion, spell correction, and recency **boosting** — then a **semantic
+  with query expansion and spell correction (recency boosting available but off by default) — then an optional **semantic
   re-rank** (Discovery Engine **Ranking API**) over the ACL-trimmed set *before* results
   and the AI answer, so the best docs lead.
 - 🔒 **Security trimming, server-side & scalable** — each doc's authorized groups are indexed
@@ -199,9 +199,11 @@ hand-off zip, and gotchas: **[`DEPLOY.md`](./DEPLOY.md)**. Teardown: `cd terrafo
 
 ## Ranking & relevance
 1. **Native GE-engine ranking** (`:search` on the **GE engine** serving config) — hybrid
-   semantic + keyword retrieval, with `queryExpansion: AUTO`, `spellCorrection: AUTO`, and a
-   recency `boostSpec` (`BOOST_RECENT_YEARS`). This is the primary ranking and is covered by the
-   GE subscription.
+   semantic + keyword retrieval, with `queryExpansion: AUTO` and `spellCorrection: AUTO`. This is
+   the primary ranking and is covered by the GE subscription; it's strong on its own. An **optional**
+   recency `boostSpec` (`BOOST_RECENT_YEARS`, **off by default**) is available for corpora with a
+   wide date range — leave it off unless recency is a genuine tie-breaker, since a blanket year
+   boost on an all-recent corpus perturbs the native relevance order rather than improving it.
 2. **Learn-to-rank autotuning** (over time) — `search` + up-vote `view-item` user events are
    reported to VAIS (`discovery.write_user_event`), so the native ranking improves with use.
 3. **Optional cross-encoder re-rank — Discovery Engine Ranking API** (`rankingConfigs:rank`,

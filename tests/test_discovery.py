@@ -45,9 +45,19 @@ def test_retrieve_sets_quality_knobs_and_boost(fake):
     body = fake.calls[0]["body"]
     assert body["queryExpansionSpec"] == {"condition": "AUTO"}
     assert body["spellCorrectionSpec"] == {"mode": "AUTO"}
+    # the `fake` fixture forces BOOST_RECENT_YEARS on, so the boost is emitted when set
     assert body["boostSpec"]["conditionBoostSpecs"][0]["condition"] == 'year: ANY("2025", "2026")'
     assert "summarySpec" not in body["contentSearchSpec"]   # retrieve = no summary
     assert docs[0]["documentId"] == "d1" and docs[0]["company"] == "amgen"
+
+
+def test_retrieve_omits_boost_by_default(monkeypatch):
+    # default BOOST_RECENT_YEARS="" -> no boostSpec, so the engine's native ranking stands
+    s = _FakeSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "BOOST_RECENT_YEARS", "")
+    discovery.retrieve("cell therapy", 10)
+    assert "boostSpec" not in s.calls[0]["body"]
 
 
 def test_retrieve_passes_filter_and_facets(fake):

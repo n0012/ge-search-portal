@@ -32,7 +32,13 @@ FIRESTORE_DATABASE = _b("FIRESTORE_DATABASE", "(default)") or "(default)"  # lit
 PAGE_SIZE = int(_b("PAGE_SIZE", "10"))
 OVERFETCH = int(_b("OVERFETCH", "5"))              # retrieve PAGE_SIZE*OVERFETCH, then trim
 FACET_SAMPLE = int(_b("FACET_SAMPLE", "100"))     # breadth for computing dynamic facets
-BOOST_RECENT_YEARS = _b("BOOST_RECENT_YEARS", "2024,2025,2026")  # ranking boost; "" disables
+# Optional recency boost — OFF by default. On this demo corpus (~all docs 2023-2026) a
+# blanket year boost adds no signal and actively corrupts the engine's native relevance
+# ranking: verified live that "amgen pipeline highlights" ranks correctly (Amgen clinical
+# papers first) natively, but a +0.3 boost on 2024-26 promotes weaker recent off-topic
+# papers above them. Set e.g. "2025,2026" only for a corpus with a wide date range where
+# recency is a genuine tie-breaker. "" disables.
+BOOST_RECENT_YEARS = _b("BOOST_RECENT_YEARS", "")
 
 # Semantic re-ranking via the Discovery Engine Ranking API, applied to the ACL-trimmed
 # results BEFORE the AI summary/answer — so both the shown results and what Gemini grounds
