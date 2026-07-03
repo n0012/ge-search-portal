@@ -247,7 +247,6 @@ export default function App() {
               key={d.documentId}
               doc={d}
               userEmail={persona?.email}
-              aiOn={aiOn}
               searchId={searchId}
               showScore={cfg.identitySource === "demo"}
               onVote={(doc: SearchResult, vote) =>
