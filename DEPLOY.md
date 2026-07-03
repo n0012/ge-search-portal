@@ -113,16 +113,30 @@ cross-encoder **Ranking API** (`rankingConfigs:rank`). It re-scores the ACL-trim
 against the full query before they're shown (and before the AI answer grounds on them).
 
 **Trade-off — this is the one thing that bills outside the subscription.** The Ranking API is a
-standalone Vertex AI Search call (SKU `93D6-7280-CF05`), so enabling it adds per-call opex and
-will show up in the billing SKU check. Leave it off to keep the "everything on the subscription"
-story clean; turn it on when relevance sharpness matters more than billing purity.
+standalone Vertex AI Search call (SKU `93D6-7280-CF05`) made on **every `/api/search`**, so cost
+scales with total search volume (not just AI answers). Leave it off to keep the "everything on the
+subscription" story clean; turn it on when relevance sharpness + visible scores matter more.
 
-Enable at runtime (no rebuild — just flip the env var on the Cloud Run service):
+**Enable declaratively (preferred)** — a deploy flag, so a later rebuild/redeploy can't silently
+drop it (Terraform pins `RERANK=on` into the Cloud Run env):
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --rerank
+# revert: re-run --steps infra WITHOUT --rerank (enable_rerank defaults false)
+```
+Ad-hoc runtime flip (not persisted in Terraform — the next infra apply reverts it):
 ```bash
 gcloud run services update ge-search-portal --region us-central1 --project YOUR_PROJECT_ID \
   --update-env-vars RERANK=on          # RERANK_TOP_N (default 50), RERANK_MODEL also tunable
-# revert: --update-env-vars RERANK=off   (or --remove-env-vars RERANK)
 ```
+
+**Track the cost.** Enable both exports alongside it so spend is observable:
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --rerank --billing-export --logging-export
+```
+Then `sql/analytics.sql` has two ready queries: **(9)** actual Ranking API $/day by SKU from the
+billing export, and **(10)** rerank call volume/day (the cost driver) from the logging export —
+divide to get an effective per-call rate. The reranker fails open (any Ranking API error →
+native order), so it never breaks search even if you later disable the API or hit a quota.
 `RERANK_EXTRACTIVE` (on by default) is unrelated to this billing — it only enriches result
 snippets with extractive passages from `:search` and is covered by the subscription; leave it on.
 

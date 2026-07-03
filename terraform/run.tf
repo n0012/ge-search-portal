@@ -59,6 +59,14 @@ resource "google_cloud_run_v2_service" "app" {
         name  = "BQ_DATASET"
         value = google_bigquery_dataset.logs.dataset_id
       }
+      # Optional cross-encoder Ranking API (SKU 93D6-7280-CF05) — declaratively enabled so a
+      # rebuild/redeploy can't silently drop it. When on, EVERY /api/search makes one Ranking
+      # API call (cost scales with search volume, not just AI turns). Off keeps all traffic on
+      # the GE subscription. Track spend via the billing export (sql/analytics.sql).
+      env {
+        name  = "RERANK"
+        value = var.enable_rerank ? "on" : "off"
+      }
     }
   }
 

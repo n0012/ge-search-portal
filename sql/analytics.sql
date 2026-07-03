@@ -102,3 +102,39 @@ FROM `ge_search_logs.ingestion_log`
 WHERE event_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
 GROUP BY stage, status
 ORDER BY stage, docs DESC;
+
+
+-- ==================================================================================
+-- Reranker cost tracking (only when RERANK=on — the standalone Ranking API, billed
+-- outside the GE subscription). Requires the optional exports:
+--   --billing-export  → dataset billing_export  (actual $ per SKU)
+--   --logging-export  → dataset ge_search_app_logs (call volume, the cost driver)
+-- ==================================================================================
+
+-- 9) Ranking API spend, by day — actual cost from the billing export.
+--    SKU 93D6-7280-CF05 = Vertex AI Search (the reranker's standalone charge).
+--    Table name is gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> — set yours.
+SELECT
+  DATE(usage_start_time)                              AS day,
+  sku.description                                     AS sku,
+  ROUND(SUM(cost), 2)                                 AS cost,
+  ROUND(SUM(SUM(cost)) OVER (ORDER BY DATE(usage_start_time)), 2) AS cost_running_total,
+  ANY_VALUE(currency)                                 AS currency
+FROM `billing_export.gcp_billing_export_resource_v1_XXXXXX_XXXXXX_XXXXXX`
+WHERE sku.id = '93D6-7280-CF05'                       -- Ranking API / Vertex AI Search SKU
+  AND usage_start_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+GROUP BY day, sku
+ORDER BY day DESC;
+
+
+-- 10) Reranker call VOLUME (the cost driver) — from the app's stdout logs export.
+--     Each search that reranks logs one 'rerank ok: ...' line; count them per day so you
+--     can correlate volume → the $ in query 9 and get an effective per-call rate.
+SELECT
+  DATE(timestamp)                                     AS day,
+  COUNTIF(textPayload LIKE 'rerank ok:%')             AS rerank_calls,
+  COUNTIF(textPayload LIKE 'rerank skipped:%')        AS rerank_skipped_or_failed
+FROM `ge_search_app_logs.run_googleapis_com_stdout`
+WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+GROUP BY day
+ORDER BY day DESC;

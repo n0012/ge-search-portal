@@ -50,8 +50,8 @@
   <text x="60" y="268" font-size="13" class="t h">Every user-facing AI call is subscription-covered</text>
   <text x="60" y="290" font-size="12.5" class="m">Search results, facets, AI summaries, follow-up Q&amp;A and per-document Q&amp;A all call the GE engine — usage draws on the pooled per-seat plan, not on metered query or token SKUs.</text>
 
-  <!-- avoided paths -->
-  <text x="40" y="340" font-size="13" class="t h">Deliberately NOT used (each would add separate charges)</text>
+  <!-- avoided paths + the one opt-in metered add-on -->
+  <text x="40" y="340" font-size="13" class="t h">Not used by default (each bills separately) — plus one opt-in add-on</text>
   <g font-size="12">
     <rect x="40" y="352" width="306" height="66" rx="10" class="card"/>
     <text x="58" y="374" class="no h">✕ Data store queried directly</text>
@@ -63,10 +63,10 @@
     <text x="384" y="392" class="m">generateContent bills per token,</text>
     <text x="384" y="408" class="m">outside the subscription</text>
 
-    <rect x="692" y="352" width="308" height="66" rx="10" class="card"/>
-    <text x="710" y="374" class="no h">✕ Standalone Ranking API</text>
-    <text x="710" y="392" class="m">separately billed cross-encoder;</text>
-    <text x="710" y="408" class="m">RERANK=off — engine ranking instead</text>
+    <rect x="692" y="352" width="308" height="66" rx="10" fill="#FFF7E6" stroke="#E0A100" stroke-width="1.5"/>
+    <text x="710" y="374" class="t h">△ Ranking API — opt-in (--rerank)</text>
+    <text x="710" y="392" class="m">sharper order + relevance scores;</text>
+    <text x="710" y="408" class="m">metered SKU, tracked via export</text>
   </g>
 
   <!-- infra -->

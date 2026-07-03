@@ -114,3 +114,9 @@ variable "enable_logging_export" {
   default     = false
   description = "Create a Cloud Logging sink streaming the app's Cloud Run service/job logs into a partitioned BigQuery dataset. deploy-all.sh flag: --logging-export."
 }
+
+variable "enable_rerank" {
+  type        = bool
+  default     = false
+  description = "Turn on the standalone cross-encoder Ranking API (RERANK=on) for sharper ordering + visible relevance scores. Adds per-search opex outside the GE subscription (SKU 93D6-7280-CF05) — track via the billing export. deploy-all.sh flag: --rerank."
+}
