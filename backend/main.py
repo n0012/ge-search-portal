@@ -100,6 +100,20 @@ def _citations(docs):
              "snippet": d.get("snippet")} for i, d in enumerate(docs)]
 
 
+def _answer_meta(text, latency_ms):
+    """Provenance shown next to AI answers. The GE assistant does not disclose the
+    underlying model or meter tokens back (usage rides the per-seat subscription, not
+    per-token billing) — the model is the engine default and tokensEstimated is an
+    ESTIMATE from answer length (~4 chars/token), labeled as such in the UI. Never
+    treat it as billing data."""
+    return {
+        "assistant": config.ASSISTANT_ID,
+        "model": "engine default (not disclosed by the GE assistant API)",
+        "tokensEstimated": (len(text) + 3) // 4 if text else 0,
+        "latencyMs": latency_ms,
+    }
+
+
 @app.post("/api/search")
 def search(request: Request, body: dict = Body(...)):
     """Fast path: retrieve + ACL-trim + facets. No LLM — the AI answer is opt-in
@@ -183,17 +197,7 @@ def answer(request: Request, body: dict = Body(...)):
                       used_search=False, result_count=len(allowed),
                       latency_ms=latency_ms)
     return {"user": user, "summary": summary, "citations": citations,
-            # Provenance for the UI. The GE assistant does not disclose the underlying
-            # model or meter tokens back (usage rides the per-seat subscription, not
-            # per-token billing), so the model is the engine default and the token
-            # figure is an ESTIMATE from answer length (~4 chars/token) — labeled as
-            # such in the UI. Do not treat tokensEstimated as billing data.
-            "meta": {
-                "assistant": config.ASSISTANT_ID,
-                "model": "engine default (not disclosed by the GE assistant API)",
-                "tokensEstimated": (len(summary) + 3) // 4 if summary else 0,
-                "latencyMs": latency_ms,
-            }}
+            "meta": _answer_meta(summary, latency_ms)}
 
 
 @app.post("/api/ask")
@@ -215,13 +219,15 @@ def ask(request: Request, body: dict = Body(...)):
     acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
     answer_text, refs = discovery.assist(question, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
+    latency_ms = int((time.monotonic() - t0) * 1000)
     discovery.write_user_event("search", query=question,
                                document_ids=allowed_ids, user_id=user)
     bqlog.log_ai_turn(user, groups, "ask", search_id=(body.get("searchId") or ""),
                       query=query, question=question, model_requested="",
                       model_used="ge-assist", used_search=False,
-                      result_count=len(allowed), latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "answer": answer_text, "citations": citations}
+                      result_count=len(allowed), latency_ms=latency_ms)
+    return {"user": user, "answer": answer_text, "citations": citations,
+            "meta": _answer_meta(answer_text, latency_ms)}
 
 
 def _doc_page(title, message, status):
@@ -270,6 +276,7 @@ def doc_qa(request: Request, body: dict = Body(...)):
     doc_q = 'Using the document titled "%s", answer: %s' % (meta.get("title") or document_id,
                                                             question)
     answer_text, _ = discovery.assist(doc_q, [document_id], acl_filter)
+    latency_ms = int((time.monotonic() - t0) * 1000)
 
     discovery.write_user_event("view-item", query=question,
                                document_ids=[document_id], user_id=user)
@@ -277,8 +284,9 @@ def doc_qa(request: Request, body: dict = Body(...)):
                       question=question, document_id=document_id,
                       model_requested="", model_used="ge-assist",
                       used_search=False, result_count=1,
-                      latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"documentId": document_id, "title": meta.get("title"), "answer": answer_text}
+                      latency_ms=latency_ms)
+    return {"documentId": document_id, "title": meta.get("title"), "answer": answer_text,
+            "meta": _answer_meta(answer_text, latency_ms)}
 
 
 @app.get("/api/doc/{document_id}")

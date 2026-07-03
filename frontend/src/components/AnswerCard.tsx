@@ -56,7 +56,7 @@ export function AnswerCard({
   meta?: AnswerMeta;
   requested: boolean;
   onGenerate: () => void;
-  onAsk?: (question: string) => Promise<string>;
+  onAsk?: (question: string) => Promise<import("../api").AskResult>;
 }) {
   const idle = !loading && !requested && !summary;
   const [qa, setQa] = useState<Turn[]>([]);

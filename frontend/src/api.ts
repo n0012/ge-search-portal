@@ -1,4 +1,10 @@
-import type { AiOpts, AppConfig, AnswerResponse, SearchResponse } from "./types";
+import type { AiOpts, AnswerMeta, AppConfig, AnswerResponse, SearchResponse } from "./types";
+
+// A Q&A turn's answer + provenance (assistant, estimated tokens, latency).
+export interface AskResult {
+  answer: string;
+  meta?: AnswerMeta;
+}
 
 // The demo persona is passed as X-Demo-User; in prod IAP supplies the identity.
 function headers(user?: string): HeadersInit {
@@ -66,14 +72,15 @@ export async function askDoc(
   question: string,
   user?: string,
   opts: AiOpts = {}
-): Promise<string> {
+): Promise<AskResult> {
   const r = await fetch("/api/doc/qa", {
     method: "POST",
     headers: headers(user),
     body: JSON.stringify({ documentId, question, ...opts }),
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "ask failed");
-  return (await r.json())?.answer ?? "";
+  const d = await r.json();
+  return { answer: d?.answer ?? "", meta: d?.meta };
 }
 
 // Q&A grounded on the WHOLE current result set (same ACL-trimmed docs as the search).
@@ -83,14 +90,15 @@ export async function askDocs(
   question: string,
   user?: string,
   opts: AiOpts = {}
-): Promise<string> {
+): Promise<AskResult> {
   const r = await fetch("/api/ask", {
     method: "POST",
     headers: headers(user),
     body: JSON.stringify({ query, facets, question, ...opts }),
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "ask failed");
-  return (await r.json())?.answer ?? "";
+  const d = await r.json();
+  return { answer: d?.answer ?? "", meta: d?.meta };
 }
 
 // Link to the imported GCS copy (server 302s to a short-lived signed URL after an
