@@ -36,6 +36,10 @@ const SECTIONS: { src?: string; title: string; body: string }[] = [
     title: "Logging, analytics & feedback",
     body: "Every interaction is logged server-side (best-effort, never blocking the request) to BigQuery — searches, AI turns (with latency), feedback votes, and ingestion events — all joinable by a per-search correlation id. That powers tracking and optimization: relevance and zero-result queries, AI attach rate, latency/cost, and ingestion health. Per-result 👍/👎 feedback also feeds VAIS user events (learn-to-rank), so the ranking improves with use. Ready-to-run queries live in sql/analytics.sql.",
   },
+  {
+    title: "Optional exports — billing & platform logs in BigQuery",
+    body: "Two flag-gated Terraform add-ons (off by default; deploy with --billing-export / --logging-export) extend the built-in app analytics with platform-level data. Billing export streams Cloud Billing's per-SKU usage cost into a `billing_export` dataset, so verifying the cost model becomes a SQL query — e.g. confirm no standalone Vertex AI Search SKU (93D6-7280-CF05) or per-token Gemini charges appear, i.e. all AI traffic rides the Gemini Enterprise subscription (one-time Console step to point the billing account at the dataset; Google exposes no API for that). Logging export adds a Cloud Logging sink that streams the Cloud Run service and job logs into date-partitioned tables in `ge_search_app_logs` — raw request latencies, error traces, assist/ingest events — joinable with the app's own ge_search_logs tables for troubleshooting (e.g. tie a slow answer to its request log and ingest state).",
+  },
 ];
 
 /** "How it works" — the architecture diagrams, rendered from /public/diagrams/*.svg. */
