@@ -212,6 +212,9 @@ hand-off zip, and gotchas: **[`DEPLOY.md`](./DEPLOY.md)**. Teardown: `cd terrafo
    billed** Vertex AI Search call (not routed through the GE engine) — turning it on means an extra
    charge outside the subscription. When on, it overfetches `RERANK_TOP_N` and feeds the
    cross-encoder VAIS **extractive segments** (`RERANK_EXTRACTIVE`) rather than short snippets.
+   **Enabling it later** is a runtime env flip on the Cloud Run service (no rebuild) — see
+   [DEPLOY.md → "Optional: sharper ranking via the Ranking API"](./DEPLOY.md) for the exact
+   command and the opex trade-off.
 
 **Interpreting the scores.** Relevance scores are in `[0,1]` and are meant for **relative
 ordering**, not as a calibrated `0.5` threshold. Strict ranking reserves high scores for near-exact
