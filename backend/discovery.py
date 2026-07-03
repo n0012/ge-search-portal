@@ -37,7 +37,7 @@ FACET_FIELDS = ["company", "report_kind", "research_source", "research_area",
                 "doc_type", "year"]
 
 
-def _search(query, page_size, summary=False, filter_="", facet_fields=None):
+def _search(query, page_size, summary=False, filter_="", facet_fields=None, retry_empty=False):
     url = f"https://{config.DE_HOST}/v1/{config.SERVING_CONFIG}:search"
     body = {
         "query": query,
@@ -70,7 +70,7 @@ def _search(query, page_size, summary=False, filter_="", facet_fields=None):
             "summaryResultCount": 5, "includeCitations": True,
             "ignoreAdversarialQuery": True, "ignoreNonSummarySeekingQuery": True,
         }
-    return _post_with_retry(url, body)
+    return _post_with_retry(url, body, retry_empty=retry_empty)
 
 
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
@@ -91,10 +91,10 @@ def _transient(r):
     return False
 
 
-def _post_with_retry(url, body, max_draws=5, hedge_after=1.2):
+def _post_with_retry(url, body, max_draws=5, hedge_after=1.2, retry_empty=False):
     """POST a :search with STAGGERED-HEDGED attempts: fire one request; if it hasn't
     answered within `hedge_after` seconds (or failed transiently), launch another
-    identical draw in parallel — first 200 wins, up to `max_draws` total.
+    identical draw in parallel — first good 200 wins, up to `max_draws` total.
 
     Why hedging instead of serial retry+backoff: during (re)index propagation the
     engine's serving replicas flap INDEPENDENTLY per request (observed live: ~35% of
@@ -104,14 +104,22 @@ def _post_with_retry(url, body, max_draws=5, hedge_after=1.2):
     one request. Queries at the GE engine are covered by the per-seat subscription,
     so extra draws add no marginal cost. Only transient failures are hedged (anything
     else raises immediately), and the filter is never weakened, so a draw can't leak.
-    Fail-closed: all draws exhausted -> raise."""
+
+    retry_empty: some flapping replicas answer 200 with an EMPTY results array (not an
+    error status) — a spurious empty that surfaced to users as "search returned
+    nothing," especially right after a deploy. When set, a 200-but-empty response is
+    treated like a transient miss and hedged/redrawn; a still-empty result after all
+    draws is returned as-is (a genuinely empty slice just costs a few extra draws). Use
+    only for the primary retrieval — facet-cascade calls are often legitimately narrow.
+    Fail-closed: all draws exhausted -> raise (or return the last empty)."""
     ex = ThreadPoolExecutor(max_workers=max_draws)
-    last = None
+    last = None            # last hard-error response (for raise)
+    last_empty = None      # last 200-but-empty payload (for return if all draws empty)
     try:
         pending = {ex.submit(_sess().post, url, json=body, timeout=60)}
         draws = 1
         while pending or draws < max_draws:
-            if not pending:  # every draw so far failed transiently — redraw
+            if not pending:  # every draw so far failed transiently/empty — redraw
                 time.sleep(0.2)
                 pending.add(ex.submit(_sess().post, url, json=body, timeout=60))
                 draws += 1
@@ -127,13 +135,19 @@ def _post_with_retry(url, body, max_draws=5, hedge_after=1.2):
                 except Exception:
                     continue  # connection-level failure — another draw may still win
                 if r.status_code == 200:
-                    return r.json()
+                    js = r.json()
+                    if retry_empty and not (js.get("results") or []):
+                        last_empty = js       # spurious-empty? keep drawing for a good one
+                        continue
+                    return js
                 last = r
                 if not _transient(r):
                     r.raise_for_status()
     finally:
         # don't wait for losing draws — they finish (or time out) in the background
         ex.shutdown(wait=False, cancel_futures=True)
+    if last_empty is not None:  # every draw was empty — genuinely empty slice
+        return last_empty
     if last is None:
         raise RuntimeError("engine search failed: no response from any attempt")
     last.raise_for_status()
@@ -234,7 +248,9 @@ def search_faceted(query, page_size, group_ids, selected, cascade=True):
     # overfetch when reranking so the semantic reranker can pull strong docs up from deeper
     # in the native-ranked list, then show the top page_size.
     fetch_n = max(page_size, config.RERANK_TOP_N) if config.RERANK else page_size
-    base = _search(query, fetch_n, filter_=full, facet_fields=FACET_FIELDS)
+    # retry_empty: a flapping replica can answer 200-with-no-results; redraw for a good
+    # one so a healthy slice never surfaces as a spurious "no results" (esp. post-deploy).
+    base = _search(query, fetch_n, filter_=full, facet_fields=FACET_FIELDS, retry_empty=True)
     facets = _facets(base)  # facet counts are corpus-wide for the filter, independent of fetch_n
     docs = [_doc(r) for r in base.get("results", [])]
     docs = rerank(query, docs)[:page_size]  # semantic re-rank BEFORE results/AI see them

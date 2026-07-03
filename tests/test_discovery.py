@@ -280,3 +280,38 @@ def test_cascade_facets_noop_without_active_or_groups(fake):
     assert discovery.cascade_facets("q", ["finance"], {}) == {}
     assert discovery.cascade_facets("q", [], {"year": ["2024"]}) == {}
     assert fake.calls == []
+
+
+class _EmptyThenResults:
+    """Returns 200-but-empty for the first N calls (the flap's spurious-empty variant),
+    then a real result — mirrors a healthy slice behind a flapping replica."""
+    def __init__(self, empty_times):
+        self.empty_times = empty_times
+        self.calls = 0
+
+    def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+        self.calls += 1
+        if self.calls <= self.empty_times:
+            return _Resp({"results": []}, status_code=200)
+        return _Resp({"results": [{"document": {"id": "d1", "structData": {"title": "T"}}}]},
+                     status_code=200)
+
+
+def test_search_retry_empty_redraws_past_spurious_empty(monkeypatch):
+    # base retrieval hedges past 200-but-empty flap responses to a good draw
+    s = _EmptyThenResults(2)
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "RERANK", False)
+    monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)
+    docs, _ = discovery.search_faceted("q", 5, ["finance"], {})
+    assert len(docs) == 1 and s.calls >= 3
+
+
+def test_search_retry_empty_returns_when_genuinely_empty(monkeypatch):
+    # a truly empty slice (every draw empty) returns [] after exhausting draws, no raise
+    s = _EmptyThenResults(999)
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "RERANK", False)
+    monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)
+    docs, facets = discovery.search_faceted("q", 5, ["finance"], {})
+    assert docs == []
