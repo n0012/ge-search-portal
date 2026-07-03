@@ -57,9 +57,20 @@ export interface SearchResponse {
   availableFilters: Record<string, FacetValue[]>;
 }
 
+// Provenance shown next to the AI answer. tokensEstimated is derived from answer
+// length (~4 chars/token) — the GE assistant doesn't meter tokens (per-seat
+// subscription, not per-token billing) and doesn't disclose the underlying model.
+export interface AnswerMeta {
+  assistant: string;
+  model: string;
+  tokensEstimated: number;
+  latencyMs: number;
+}
+
 // AI answer is served separately (opt-in) by /api/answer so search stays fast.
 export interface AnswerResponse {
   user: string;
   summary: string;
   citations: Citation[];
+  meta?: AnswerMeta;
 }

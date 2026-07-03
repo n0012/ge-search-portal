@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
 import { getConfig, search, fetchFacetPatch, generateAnswer, askDocs, sendFeedback } from "./api";
-import type { AppConfig, Citation, FacetValue, Persona, SearchResponse, SearchResult } from "./types";
+import type { AnswerMeta, AppConfig, Citation, FacetValue, Persona, SearchResponse, SearchResult } from "./types";
 
 interface AnswerState {
   loading: boolean;
   requested: boolean;
   summary: string;
   citations: Citation[];
+  meta?: AnswerMeta;
 }
 const EMPTY_ANSWER: AnswerState = { loading: false, requested: false, summary: "", citations: [] };
 import { HeroLanding } from "./components/HeroLanding";
@@ -48,7 +49,8 @@ export default function App() {
     setAns({ ...EMPTY_ANSWER, loading: true, requested: true });
     try {
       const a = await generateAnswer(q, facets, persona?.email, { searchId: sid });
-      setAns({ loading: false, requested: true, summary: a.summary, citations: a.citations });
+      setAns({ loading: false, requested: true, summary: a.summary, citations: a.citations,
+               meta: a.meta });
     } catch {
       setAns({ loading: false, requested: true, summary: "", citations: [] });
     }
@@ -230,6 +232,7 @@ export default function App() {
               loading={ans.loading}
               summary={ans.summary}
               citations={ans.citations}
+              meta={ans.meta}
               requested={ans.requested}
               onGenerate={() => generate(query, selected)}
               onAsk={(q) => askDocs(query, selected, q, persona?.email, { searchId })}

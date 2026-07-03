@@ -176,12 +176,24 @@ def answer(request: Request, body: dict = Body(...)):
     summary_q = "Summarize, with specifics, what the accessible documents say about: %s" % query
     summary, refs = discovery.assist(summary_q, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
+    latency_ms = int((time.monotonic() - t0) * 1000)
 
     bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),
                       query=query, model_requested="", model_used="ge-assist",
                       used_search=False, result_count=len(allowed),
-                      latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "summary": summary, "citations": citations}
+                      latency_ms=latency_ms)
+    return {"user": user, "summary": summary, "citations": citations,
+            # Provenance for the UI. The GE assistant does not disclose the underlying
+            # model or meter tokens back (usage rides the per-seat subscription, not
+            # per-token billing), so the model is the engine default and the token
+            # figure is an ESTIMATE from answer length (~4 chars/token) — labeled as
+            # such in the UI. Do not treat tokensEstimated as billing data.
+            "meta": {
+                "assistant": config.ASSISTANT_ID,
+                "model": "engine default (not disclosed by the GE assistant API)",
+                "tokensEstimated": (len(summary) + 3) // 4 if summary else 0,
+                "latencyMs": latency_ms,
+            }}
 
 
 @app.post("/api/ask")
