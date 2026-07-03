@@ -273,15 +273,26 @@ def doc_qa(request: Request, body: dict = Body(...)):
         return JSONResponse({"error": "document not found"}, status_code=404)
 
     t0 = time.monotonic()
-    # Grounded via the GE engine assistant within the user's ACL scope, steered to THIS
-    # document by naming its title in the query (`id` is not filterable on a GE engine, so
-    # exact single-doc pinning isn't possible server-side; the ACL predicate still bounds
-    # what can ground). Covered by the GE subscription and ACL-safe.
     acl_filter = discovery.build_filter({"acl_groups": sorted(groups)})
-    doc_q = 'Using the document titled "%s", answer: %s' % (meta.get("title") or document_id,
-                                                            question)
-    answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
-                                               session=(body.get("sessionId") or None))
+    title = meta.get("title") or document_id
+    sess_in = body.get("sessionId") or None
+    # Answer from the document we ALREADY have: fetch this doc's passages via the hardened
+    # search (pinned by its unique source_url, ACL-filtered) and hand them to the assistant
+    # as context. This decouples doc-QA from the assistant's flap-fragile internal retrieval
+    # — it no longer has to re-find the doc by title, it just reads the excerpts we pass.
+    content = discovery.doc_content(meta.get("sourceUrl"), title, acl_filter)
+    if content:
+        doc_q = ('Using ONLY the following excerpts from the document titled "%s", answer the '
+                 "question. If the excerpts don't contain the answer, say so.\n\n"
+                 "Excerpts:\n%s\n\nQuestion: %s" % (title, content, question))
+        # grounding is the provided excerpts (not the assistant's own search) -> keep the answer
+        answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
+                                                   session=sess_in, require_grounding=False)
+    else:
+        # no retrievable content (rare) -> fall back to steering the assistant by title
+        doc_q = 'Using the document titled "%s", answer: %s' % (title, question)
+        answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
+                                                   session=sess_in)
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     discovery.write_user_event("view-item", query=question,

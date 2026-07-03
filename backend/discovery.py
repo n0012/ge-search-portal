@@ -330,7 +330,32 @@ def get_document(document_id):
     sd = j.get("structData", {}) or {}
     return {"documentId": j.get("id"),
             "title": sd.get("title") or j.get("id"),
+            "sourceUrl": sd.get("source_url"),
             "gcsUri": ((j.get("content") or {}).get("uri")) or None}
+
+
+def doc_content(source_url, title, base_filter, max_chars=6000):
+    """Retrieve ONE document's answer-bearing passages so doc-QA can ground on content the
+    app already has — instead of making the assistant re-find the doc by title (its internal
+    search tool is the flap-fragile part). Pins the doc by its unique `source_url` (a
+    filterable field) inside the caller's ACL filter, via the hardened search (hedged +
+    empty-retry), and returns concatenated extractive text ('' if unavailable)."""
+    if not source_url:
+        return ""
+    su = str(source_url).replace('"', "")
+    pin = f'source_url: ANY("{su}")'
+    full = f"({base_filter}) AND ({pin})" if base_filter else pin
+    try:
+        js = _search(title or "document", 1, filter_=full, retry_empty=True)
+    except Exception as e:
+        print("doc_content skipped: %s: %s" % (type(e).__name__, str(e)[:120]), flush=True)
+        return ""
+    for r in js.get("results", []):
+        d = parse_doc(r)
+        txt = d.get("segment") or d.get("snippet") or ""
+        if txt:
+            return txt[:max_chars]
+    return ""
 
 
 def get_content_uri(document_id):
@@ -424,7 +449,7 @@ def _assist_once(query, base_filter, session):
     return "".join(parts), _assist_refs_to_docs(refs), out_session, len(events)
 
 
-def assist(query, doc_ids, base_filter="", session=None):
+def assist(query, doc_ids, base_filter="", session=None, require_grounding=True):
     """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), scoped by
     base_filter — the caller's ACL(+facet) predicate, e.g. 'acl_groups: ANY("finance")'.
     Querying the GE engine keeps the call covered by the GE subscription. Returns
@@ -442,23 +467,32 @@ def assist(query, doc_ids, base_filter="", session=None):
     in a grounded-search product) so the UI shows the honest "no answer" state. Callers
     keep their citation fallback.
 
+    require_grounding: True (default) when the answer depends on the assistant's own
+    retrieval — then zero-refs means it flaked, so we retry once and suppress the
+    boilerplate. False when the caller has already embedded the source content in the
+    query (doc-QA): the grounding IS the provided text, so a zero-ref answer is kept as-is
+    and we don't waste a retry hunting for refs that won't come.
+
     doc_ids is the ACL-trimmed page — the anything-to-answer guard and citation fallback.
     It is NOT sent as a filter: `id` isn't filterable on a GE engine (verified live).
     Fail-closed: no docs or no filter -> no call."""
     if not doc_ids or not base_filter:
         return "", [], None
     text, docs, out_session = "", [], None
-    for attempt in range(2):  # 1 retry — assist calls are slow, and the flap usually clears
+    attempts = 2 if require_grounding else 1
+    for attempt in range(attempts):
         try:
             text, docs, out_session, nev = _assist_once(query, base_filter, session)
         except Exception as e:
             print("assist error (attempt %d): %s: %s" % (
                 attempt + 1, type(e).__name__, str(e)[:160]), flush=True)
             continue
-        print("assist ok: ids=%d events=%d refs=%d chars=%d attempt=%d" % (
-            len(doc_ids), nev, len(docs), len(text), attempt + 1), flush=True)
-        if docs:  # grounded -> good answer
+        print("assist ok: ids=%d events=%d refs=%d chars=%d attempt=%d grounding=%s" % (
+            len(doc_ids), nev, len(docs), len(text), attempt + 1, require_grounding), flush=True)
+        if docs or not require_grounding:
+            # grounded, OR caller supplied its own context (doc-QA) -> keep the answer
             return text, docs, out_session
-        # zero refs = grounding failed (flap / degraded boilerplate); retry once
-    # never grounded: suppress the ungrounded text, keep the session for continuity
-    return "", docs, out_session
+        # zero refs and grounding required = flap/boilerplate; retry once
+    if require_grounding:
+        return "", docs, out_session  # never grounded: suppress the boilerplate
+    return text, docs, out_session    # context-grounded: keep whatever we got

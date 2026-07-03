@@ -336,3 +336,34 @@ def test_search_faceted_filter_always_carries_acl(monkeypatch):
     for c in s.calls:
         assert 'acl_groups: ANY("finance")' in (c["body"].get("filter") or ""), \
             "an engine query went out without the acl_groups predicate"
+
+
+def test_assist_context_grounded_keeps_zero_ref_answer(monkeypatch):
+    # require_grounding=False (doc-QA with embedded content): a non-empty answer with zero
+    # refs is KEPT (the grounding is the provided excerpts), and no retry is spent.
+    class _NoRefs:
+        calls = 0
+        def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+            _NoRefs.calls += 1
+            return _Resp([{"answer": {"replies": [{"groundedContent": {
+                "content": {"role": "model", "text": "Key points: A, B, C."}}}]}}])
+    monkeypatch.setattr(discovery, "_session", _NoRefs())
+    text, docs, _ = discovery.assist("ctx q", ["d1"], 'acl_groups: ANY("finance")',
+                                     require_grounding=False)
+    assert text == "Key points: A, B, C." and _NoRefs.calls == 1
+
+
+def test_doc_content_pins_by_source_url_within_acl(monkeypatch):
+    s = _FakeSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "RERANK", False)
+    discovery.doc_content("https://x/d1.pdf", "Doc One", 'acl_groups: ANY("finance")')
+    flt = s.calls[0]["body"]["filter"]
+    assert 'source_url: ANY("https://x/d1.pdf")' in flt
+    assert 'acl_groups: ANY("finance")' in flt  # ACL still applied while pinning the doc
+
+
+def test_doc_content_empty_source_url_noops(monkeypatch):
+    s = _FakeSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    assert discovery.doc_content("", "T", 'acl_groups: ANY("finance")') == "" and s.calls == []
