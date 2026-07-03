@@ -315,3 +315,24 @@ def test_search_retry_empty_returns_when_genuinely_empty(monkeypatch):
     monkeypatch.setattr(discovery.time, "sleep", lambda *_: None)
     docs, facets = discovery.search_faceted("q", 5, ["finance"], {})
     assert docs == []
+
+
+def test_search_faceted_empty_groups_never_queries_engine(monkeypatch):
+    # FAIL-CLOSED at the retrieval layer: a user with no groups must get nothing AND
+    # the engine must never be queried (so there's no path that could return unfiltered).
+    s = _FakeSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    docs, facets = discovery.search_faceted("q", 5, [], {})
+    assert docs == [] and facets == {} and s.calls == []
+
+
+def test_search_faceted_filter_always_carries_acl(monkeypatch):
+    # every engine query for a grouped user must be scoped by acl_groups (never unfiltered)
+    s = _FakeSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "RERANK", False)
+    discovery.search_faceted("q", 5, ["finance"], {"year": ["2024"]})
+    assert s.calls, "expected an engine query"
+    for c in s.calls:
+        assert 'acl_groups: ANY("finance")' in (c["body"].get("filter") or ""), \
+            "an engine query went out without the acl_groups predicate"
