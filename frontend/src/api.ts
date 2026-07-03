@@ -1,9 +1,11 @@
 import type { AiOpts, AnswerMeta, AppConfig, AnswerResponse, SearchResponse } from "./types";
 
-// A Q&A turn's answer + provenance (assistant, estimated tokens, latency).
+// A Q&A turn's answer + provenance (assistant, estimated tokens, latency) + the assistant
+// session to thread into the next turn so follow-ups keep conversational context.
 export interface AskResult {
   answer: string;
   meta?: AnswerMeta;
+  sessionId?: string;
 }
 
 // The demo persona is passed as X-Demo-User; in prod IAP supplies the identity.
@@ -80,7 +82,7 @@ export async function askDoc(
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "ask failed");
   const d = await r.json();
-  return { answer: d?.answer ?? "", meta: d?.meta };
+  return { answer: d?.answer ?? "", meta: d?.meta, sessionId: d?.sessionId };
 }
 
 // Q&A grounded on the WHOLE current result set (same ACL-trimmed docs as the search).
@@ -98,7 +100,7 @@ export async function askDocs(
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "ask failed");
   const d = await r.json();
-  return { answer: d?.answer ?? "", meta: d?.meta };
+  return { answer: d?.answer ?? "", meta: d?.meta, sessionId: d?.sessionId };
 }
 
 // Link to the imported GCS copy (server 302s to a short-lived signed URL after an

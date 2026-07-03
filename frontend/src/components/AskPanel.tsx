@@ -22,7 +22,7 @@ export function AskPanel({
   defaultOpen = false,
   onTurnsChange,
 }: {
-  ask: (question: string) => Promise<AskResult>;
+  ask: (question: string, session?: string) => Promise<AskResult>;
   title: string;
   placeholder: string;
   summarize?: { label: string; prompt: string };
@@ -34,6 +34,8 @@ export function AskPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Thread the assistant session across turns so follow-ups keep conversational context.
+  const [session, setSession] = useState<string | undefined>();
 
   // surface the transcript to the parent (so the card's "Copy as Markdown" captures Q&A)
   useEffect(() => {
@@ -48,7 +50,8 @@ export function AskPanel({
     setErr("");
     setInput("");
     try {
-      const r = await ask(q);
+      const r = await ask(q, session);
+      if (r.sessionId) setSession(r.sessionId);
       setTurns((t) => [...t, { q, a: r.answer || "_No answer for the documents you can access._",
                                meta: r.meta }]);
     } catch (e: any) {

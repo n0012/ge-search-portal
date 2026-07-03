@@ -188,7 +188,9 @@ def answer(request: Request, body: dict = Body(...)):
     # Search queries are usually keywords, which the assistant declines as
     # NON_ASSIST_SEEKING_QUERY_IGNORED — wrap them in an explicit summarization ask.
     summary_q = "Summarize, with specifics, what the accessible documents say about: %s" % query
-    summary, refs = discovery.assist(summary_q, allowed_ids, acl_filter)
+    # A new result-set answer starts a fresh assistant conversation; the returned session
+    # is handed to the client so its "Ask about these documents" follow-ups keep context.
+    summary, refs, session = discovery.assist(summary_q, allowed_ids, acl_filter)
     citations = _citations(refs) if refs else _citations(allowed)
     latency_ms = int((time.monotonic() - t0) * 1000)
 
@@ -197,7 +199,7 @@ def answer(request: Request, body: dict = Body(...)):
                       used_search=False, result_count=len(allowed),
                       latency_ms=latency_ms)
     return {"user": user, "summary": summary, "citations": citations,
-            "meta": _answer_meta(summary, latency_ms)}
+            "sessionId": session, "meta": _answer_meta(summary, latency_ms)}
 
 
 @app.post("/api/ask")
@@ -217,7 +219,10 @@ def ask(request: Request, body: dict = Body(...)):
     # + active facet filters (same enforced predicate as the search trim).
     allowed_ids = [d["documentId"] for d in allowed]
     acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
-    answer_text, refs = discovery.assist(question, allowed_ids, acl_filter)
+    # Continue the answer-card conversation when the client passes its sessionId, so
+    # follow-ups like "show a trend from these docs" resolve against the prior turns.
+    answer_text, refs, session = discovery.assist(question, allowed_ids, acl_filter,
+                                                  session=(body.get("sessionId") or None))
     citations = _citations(refs) if refs else _citations(allowed)
     latency_ms = int((time.monotonic() - t0) * 1000)
     discovery.write_user_event("search", query=question,
@@ -227,7 +232,7 @@ def ask(request: Request, body: dict = Body(...)):
                       model_used="ge-assist", used_search=False,
                       result_count=len(allowed), latency_ms=latency_ms)
     return {"user": user, "answer": answer_text, "citations": citations,
-            "meta": _answer_meta(answer_text, latency_ms)}
+            "sessionId": session, "meta": _answer_meta(answer_text, latency_ms)}
 
 
 def _doc_page(title, message, status):
@@ -275,7 +280,8 @@ def doc_qa(request: Request, body: dict = Body(...)):
     acl_filter = discovery.build_filter({"acl_groups": sorted(groups)})
     doc_q = 'Using the document titled "%s", answer: %s' % (meta.get("title") or document_id,
                                                             question)
-    answer_text, _ = discovery.assist(doc_q, [document_id], acl_filter)
+    answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
+                                               session=(body.get("sessionId") or None))
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     discovery.write_user_event("view-item", query=question,
@@ -286,7 +292,7 @@ def doc_qa(request: Request, body: dict = Body(...)):
                       used_search=False, result_count=1,
                       latency_ms=latency_ms)
     return {"documentId": document_id, "title": meta.get("title"), "answer": answer_text,
-            "meta": _answer_meta(answer_text, latency_ms)}
+            "sessionId": session, "meta": _answer_meta(answer_text, latency_ms)}
 
 
 @app.get("/api/doc/{document_id}")

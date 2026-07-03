@@ -9,6 +9,7 @@ interface AnswerState {
   summary: string;
   citations: Citation[];
   meta?: AnswerMeta;
+  sessionId?: string; // assistant session, threaded into "Ask about these documents" follow-ups
 }
 const EMPTY_ANSWER: AnswerState = { loading: false, requested: false, summary: "", citations: [] };
 import { HeroLanding } from "./components/HeroLanding";
@@ -50,7 +51,7 @@ export default function App() {
     try {
       const a = await generateAnswer(q, facets, persona?.email, { searchId: sid });
       setAns({ loading: false, requested: true, summary: a.summary, citations: a.citations,
-               meta: a.meta });
+               meta: a.meta, sessionId: a.sessionId });
     } catch {
       setAns({ loading: false, requested: true, summary: "", citations: [] });
     }
@@ -235,7 +236,8 @@ export default function App() {
               meta={ans.meta}
               requested={ans.requested}
               onGenerate={() => generate(query, selected)}
-              onAsk={(q) => askDocs(query, selected, q, persona?.email, { searchId })}
+              onAsk={(q, session) => askDocs(query, selected, q, persona?.email,
+                { searchId, sessionId: session ?? ans.sessionId })}
             />
           )}
 

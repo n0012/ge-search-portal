@@ -17,7 +17,7 @@ export function DocQA({
       title="Ask AI about this document"
       placeholder="Ask a question about this document…"
       summarize={{ label: "Summarize", prompt: "Summarize this document's key points in a few concise bullets." }}
-      ask={(q) => askDoc(documentId, q, userEmail, { searchId })}
+      ask={(q, session) => askDoc(documentId, q, userEmail, { searchId, sessionId: session })}
     />
   );
 }

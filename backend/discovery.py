@@ -381,48 +381,68 @@ def _parse_assist_stream(text):
     return events
 
 
-def assist(query, doc_ids, base_filter=""):
-    """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), scoped by
-    base_filter — the caller's ACL(+facet) predicate, e.g. 'acl_groups: ANY("finance")'.
-    Querying the GE engine keeps the call covered by the GE subscription (vs. the data
-    store / a non-GE engine, which bill standalone). The SSE stream is consumed and
-    assembled into a single (answerText, citation_docs). Best-effort: errors -> ("", []).
-
-    doc_ids is the ACL-trimmed result page and acts only as the anything-to-answer guard
-    (callers also use it for citation fallback). It is NOT sent as a filter: `id` is not a
-    filterable field on a GE engine — the engine's :search parser rejects it outright and
-    the assistant's search tool silently fails to ground (verified against a live
-    GE-licensed engine). Per-user isolation instead rides the same indexed acl_groups
-    predicate the search trim uses, which the assistant tool honors and enforces.
-    Fail-closed: no docs or no filter -> no call."""
-    if not doc_ids or not base_filter:
-        return "", []
+def _assist_once(query, base_filter, session):
+    """One :streamAssist call. Returns (text, docs, out_session, n_events). Raises on
+    transport/HTTP error so the caller can retry."""
     url = f"https://{config.DE_HOST}/v1/{config.ASSISTANT_PATH}:streamAssist"
     body = {"query": {"text": query},
             "toolsSpec": {"vertexAiSearchSpec": {"filter": base_filter}}}
-    try:
-        r = _sess().post(url, json=body, timeout=120)
-        r.raise_for_status()
-        events = _parse_assist_stream(r.text)
-    except Exception as e:
-        print("assist skipped: %s: %s" % (type(e).__name__, str(e)[:200]), flush=True)
-        return "", []
-    parts, refs, skipped = [], [], []
+    if session:
+        body["session"] = session
+    r = _sess().post(url, json=body, timeout=120)
+    r.raise_for_status()
+    events = _parse_assist_stream(r.text)
+    parts, refs, out_session = [], [], None
     for ev in events:
-        ans = ev.get("answer", {}) or {}
-        skipped.extend(ans.get("assistSkippedReasons") or [])
-        for reply in ans.get("replies", []) or []:
+        si = ev.get("sessionInfo", {}) or {}
+        if si.get("session"):
+            out_session = si["session"]
+        for reply in (ev.get("answer", {}) or {}).get("replies", []) or []:
             gc = reply.get("groundedContent", {}) or {}
             # AssistantContent carries the text directly (`content.text`), not a Gemini-style
             # `parts[]`; `thought: true` chunks are model reasoning, not answer text.
             content = gc.get("content", {}) or {}
             if content.get("text") and not content.get("thought"):
                 parts.append(content["text"])
-            tgm = gc.get("textGroundingMetadata", {}) or {}
-            refs.extend(tgm.get("references", []) or [])
-    text = "".join(parts)
-    docs = _assist_refs_to_docs(refs)
-    print("assist ok: ids=%d events=%d refs=%d chars=%d%s" % (
-        len(doc_ids), len(events), len(docs), len(text),
-        (" skipped=" + ",".join(skipped)) if skipped else ""), flush=True)
-    return text, docs
+            refs.extend((gc.get("textGroundingMetadata", {}) or {}).get("references", []) or [])
+    return "".join(parts), _assist_refs_to_docs(refs), out_session, len(events)
+
+
+def assist(query, doc_ids, base_filter="", session=None):
+    """Grounded answer via the Gemini Enterprise engine assistant (:streamAssist), scoped by
+    base_filter — the caller's ACL(+facet) predicate, e.g. 'acl_groups: ANY("finance")'.
+    Querying the GE engine keeps the call covered by the GE subscription. Returns
+    (answerText, citation_docs, session). Best-effort: errors -> ("", [], None).
+
+    `session` threads the assistant's conversation: pass the value returned by a prior
+    call so follow-ups keep context ("a trend from these docs" resolves); None starts a
+    fresh conversation. The ACL filter is still sent every turn, so the trim holds.
+
+    Grounding-failure retry: when the assistant's internal search tool flakes (the same
+    serving-replica turbulence that hits :search), it grounds ZERO references and emits a
+    misleading "I can't reach the repository / upload a file" boilerplate. A healthy call
+    grounds ≥1 ref, so we retry once on zero-refs; if it still can't ground, we return
+    EMPTY text (not the ungrounded boilerplate — an ungrounded answer is worse than none
+    in a grounded-search product) so the UI shows the honest "no answer" state. Callers
+    keep their citation fallback.
+
+    doc_ids is the ACL-trimmed page — the anything-to-answer guard and citation fallback.
+    It is NOT sent as a filter: `id` isn't filterable on a GE engine (verified live).
+    Fail-closed: no docs or no filter -> no call."""
+    if not doc_ids or not base_filter:
+        return "", [], None
+    text, docs, out_session = "", [], None
+    for attempt in range(2):  # 1 retry — assist calls are slow, and the flap usually clears
+        try:
+            text, docs, out_session, nev = _assist_once(query, base_filter, session)
+        except Exception as e:
+            print("assist error (attempt %d): %s: %s" % (
+                attempt + 1, type(e).__name__, str(e)[:160]), flush=True)
+            continue
+        print("assist ok: ids=%d events=%d refs=%d chars=%d attempt=%d" % (
+            len(doc_ids), nev, len(docs), len(text), attempt + 1), flush=True)
+        if docs:  # grounded -> good answer
+            return text, docs, out_session
+        # zero refs = grounding failed (flap / degraded boilerplate); retry once
+    # never grounded: suppress the ungrounded text, keep the session for continuity
+    return "", docs, out_session

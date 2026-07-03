@@ -118,7 +118,7 @@ def test_assist_sets_streamassist_url_filter_and_maps_refs(monkeypatch):
     monkeypatch.setattr(discovery.config, "ASSISTANT_PATH",
                         "projects/p/locations/global/collections/default_collection/"
                         "engines/ge-search-app/assistants/default_assistant")
-    text, docs = discovery.assist("q", ["a", "b"], 'acl_groups: ANY("finance")')
+    text, docs, session = discovery.assist("q", ["a", "b"], 'acl_groups: ANY("finance")')
     body = s.calls[0]["body"]
     assert s.calls[0]["url"].endswith(":streamAssist")
     assert "engines/ge-search-app/assistants/default_assistant" in s.calls[0]["url"]
@@ -127,30 +127,57 @@ def test_assist_sets_streamassist_url_filter_and_maps_refs(monkeypatch):
     # GE engine; the assistant's search tool fails to ground on it)
     assert body["toolsSpec"]["vertexAiSearchSpec"]["filter"] == 'acl_groups: ANY("finance")'
     assert "id: ANY" not in body["toolsSpec"]["vertexAiSearchSpec"]["filter"]
+    assert "session" not in body  # no session passed -> fresh conversation
     assert text == "Grounded answer [1]."
     assert docs == [{"documentId": "d1", "title": "Doc One",
                      "sourceUrl": "https://x/d1.pdf", "snippet": "cited chunk text"}]
+    assert len(s.calls) == 1  # grounded on first try -> no retry
+
+
+def test_assist_threads_session(monkeypatch):
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    discovery.assist("q", ["a"], 'acl_groups: ANY("finance")', session="sessions/S1")
+    assert s.calls[0]["body"]["session"] == "sessions/S1"
 
 
 def test_assist_empty_ids_noops(monkeypatch):
     s = _AssistSession()
     monkeypatch.setattr(discovery, "_session", s)
-    text, docs = discovery.assist("q", [], 'acl_groups: ANY("finance")')
-    assert text == "" and docs == [] and s.calls == []
+    text, docs, session = discovery.assist("q", [], 'acl_groups: ANY("finance")')
+    assert text == "" and docs == [] and session is None and s.calls == []
 
 
 def test_assist_no_filter_fails_closed(monkeypatch):
     # without an ACL predicate the assistant would search the WHOLE store — never call
     s = _AssistSession()
     monkeypatch.setattr(discovery, "_session", s)
-    text, docs = discovery.assist("q", ["a"])
-    assert text == "" and docs == [] and s.calls == []
+    text, docs, session = discovery.assist("q", ["a"])
+    assert text == "" and docs == [] and session is None and s.calls == []
+
+
+def test_assist_retries_then_suppresses_ungrounded(monkeypatch):
+    # zero grounding refs = the assistant's search tool flaked and emitted misleading
+    # boilerplate — retry once, and if still ungrounded return EMPTY text (not the
+    # boilerplate) so the UI shows an honest "no answer".
+    class _NoRefs:
+        calls = 0
+        def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+            _NoRefs.calls += 1
+            return _Resp([{"answer": {"replies": [{"groundedContent": {
+                "content": {"role": "model", "text": "I can't reach the repository; upload a file."}}}]}}])
+    monkeypatch.setattr(discovery, "_session", _NoRefs())
+    text, docs, _ = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    assert text == "" and docs == [] and _NoRefs.calls == 2  # one retry, then suppressed
 
 
 def test_assist_parses_sse_data_lines(monkeypatch):
-    # tolerate SSE 'data:' framing as well as a JSON array
+    # tolerate SSE 'data:' framing as well as a JSON array (include a grounding ref so it
+    # counts as grounded and the text isn't suppressed)
     sse = ('data: {"answer":{"replies":[{"groundedContent":'
-           '{"content":{"role":"model","text":"hello"}}}]}}\n')
+           '{"content":{"role":"model","text":"hello"},'
+           '"textGroundingMetadata":{"references":[{"content":"c",'
+           '"documentMetadata":{"document":"x/d1","title":"D1","uri":"u"}}]}}}]}}\n')
 
     class _SSE:
         calls = []
@@ -160,8 +187,8 @@ def test_assist_parses_sse_data_lines(monkeypatch):
             return _Resp(None, text=sse)
 
     monkeypatch.setattr(discovery, "_session", _SSE())
-    text, docs = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
-    assert text == "hello"
+    text, docs, session = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    assert text == "hello" and len(docs) == 1
 
 
 class _FlakySession:
