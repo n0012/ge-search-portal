@@ -45,10 +45,6 @@ export function HeroLanding({
       {/* top bar */}
       <header className="relative z-10 flex items-center justify-between px-6 py-5">
         <Wordmark onLight onHome={onHome} />
-        <div className="hidden items-center gap-2 rounded-full bg-amgen-green/15 px-3 py-1 text-xs font-medium text-amgen-teal md:flex">
-          The more you use it, the smarter it becomes
-          <span className="font-bold text-amgen-green">(Roadmap)</span>
-        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={onHow}
