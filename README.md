@@ -90,6 +90,7 @@ in-app under **"How it works"**):
 | [`arch-ingest.svg`](./frontend/public/diagrams/arch-ingest.svg) | Catalog & document-processing pipeline (layout parser → chunking → index; initial + incremental) |
 | [`arch-aws-sync.svg`](./frontend/public/diagrams/arch-aws-sync.svg) | Syncing with AWS DynamoDB via the Firestore catalog contract |
 | [`arch-logging.svg`](./frontend/public/diagrams/arch-logging.svg) | Logging, analytics & feedback (BigQuery + learn-to-rank loop) |
+| [`arch-exports.svg`](./frontend/public/diagrams/arch-exports.svg) | Optional BigQuery exports — billing (per-SKU cost) + Cloud Logging (troubleshooting), flag-gated |
 
 ## Security model (the core)
 - **RBAC, dynamic, enforced server-side, not user-controllable.** A user sees a document iff
