@@ -111,20 +111,26 @@ ORDER BY stage, docs DESC;
 --   --logging-export  → dataset ge_search_app_logs (call volume, the cost driver)
 -- ==================================================================================
 
--- 9) Ranking API spend, by day — actual cost from the billing export.
---    SKU 93D6-7280-CF05 = Vertex AI Search (the reranker's standalone charge).
+-- 9) Reranker + subscription-coverage spend, by day — actual cost from the billing export.
+--    Two SKUs to watch (both under service "Vertex AI Search"):
+--      EE89-3EE8-2541  "Vertex AI Search: Ranking"   = the reranker ($1/1,000, no free tier);
+--                                                       nonzero ONLY when RERANK=on.
+--      93D6-7280-CF05  "Search API Request Count - Enterprise" = standalone Enterprise search
+--                                                       ($4/1,000); should be ~$0 because all
+--                                                       search rides the GE subscription.
+--    (BADA-EE26-7BDA is the Standard-tier search SKU, $1.50/1,000 — also expect ~$0.)
 --    Table name is gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> — set yours.
 SELECT
   DATE(usage_start_time)                              AS day,
+  sku.id                                              AS sku_id,
   sku.description                                     AS sku,
   ROUND(SUM(cost), 2)                                 AS cost,
-  ROUND(SUM(SUM(cost)) OVER (ORDER BY DATE(usage_start_time)), 2) AS cost_running_total,
   ANY_VALUE(currency)                                 AS currency
 FROM `billing_export.gcp_billing_export_resource_v1_XXXXXX_XXXXXX_XXXXXX`
-WHERE sku.id = '93D6-7280-CF05'                       -- Ranking API / Vertex AI Search SKU
+WHERE sku.id IN ('EE89-3EE8-2541', '93D6-7280-CF05', 'BADA-EE26-7BDA')  -- rerank + standalone search
   AND usage_start_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
-GROUP BY day, sku
-ORDER BY day DESC;
+GROUP BY day, sku_id, sku
+ORDER BY day DESC, cost DESC;
 
 
 -- 10) Reranker call VOLUME (the cost driver) — from the app's stdout logs export.

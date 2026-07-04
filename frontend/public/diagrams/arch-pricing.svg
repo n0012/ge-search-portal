@@ -17,7 +17,7 @@
   <rect x="40" y="92" width="960" height="72" rx="12" fill="#0056B3"/>
   <text x="60" y="120" font-size="15" class="w h">Gemini Enterprise — per user / per month subscription</text>
   <text x="60" y="141" font-size="11.5" class="w">Monthly or annual · up to 5,000 seats self-serve · Business (≤300 seats, 30-day trial) · Standard / Plus (unlimited, +Code Assist) · Frontline add-on</text>
-  <text x="60" y="157" font-size="11.5" class="w">Per-seat price: Business is self-serve (shown at sign-up); Standard / Plus / Frontline via Google Cloud sales</text>
+  <text x="60" y="157" font-size="11.5" class="w">List price (Cloud Billing Catalog, annual–monthly): Standard ~$30–35 · Plus ~$50–60 · Frontline ~$12.50–15 per user/mo · Business self-serve · actual may be negotiated</text>
 
   <!-- included -->
   <text x="40" y="196" font-size="13" class="t h">Included in the seat — no separate per-use charge to you</text>
@@ -49,8 +49,8 @@
   <g font-size="11.5">
     <rect x="40" y="348" width="300" height="86" rx="10" class="card"/>
     <text x="58" y="370" class="t h">Opt-in Ranking API (--rerank)</text>
-    <text x="58" y="389" class="m">cross-encoder rerank; consumption</text>
-    <text x="58" y="405" class="m">SKU 93D6-7280-CF05, per 1k queries.</text>
+    <text x="58" y="389" class="m">cross-encoder rerank — SKU EE89-3EE8-2541</text>
+    <text x="58" y="405" class="m">"Vertex AI Search: Ranking" $1/1,000 (no free tier).</text>
     <text x="58" y="421" class="m">Off by default → then nothing here.</text>
 
     <rect x="352" y="348" width="300" height="86" rx="10" class="card"/>

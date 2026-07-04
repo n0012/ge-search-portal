@@ -65,8 +65,8 @@
 
     <rect x="692" y="352" width="308" height="66" rx="10" fill="#FFF7E6" stroke="#E0A100" stroke-width="1.5"/>
     <text x="710" y="374" class="t h">△ Ranking API — opt-in (--rerank)</text>
-    <text x="710" y="392" class="m">sharper order + relevance scores;</text>
-    <text x="710" y="408" class="m">metered SKU, tracked via export</text>
+    <text x="710" y="392" class="m">SKU EE89-3EE8-2541, $1/1,000;</text>
+    <text x="710" y="408" class="m">tracked via billing export</text>
   </g>
 
   <!-- infra -->

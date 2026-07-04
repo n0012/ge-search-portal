@@ -113,9 +113,11 @@ cross-encoder **Ranking API** (`rankingConfigs:rank`). It re-scores the ACL-trim
 against the full query before they're shown (and before the AI answer grounds on them).
 
 **Trade-off — this is the one thing that bills outside the subscription.** The Ranking API is a
-standalone Vertex AI Search call (SKU `93D6-7280-CF05`) made on **every `/api/search`**, so cost
-scales with total search volume (not just AI answers). Leave it off to keep the "everything on the
-subscription" story clean; turn it on when relevance sharpness + visible scores matter more.
+standalone Vertex AI Search call (SKU `EE89-3EE8-2541`, "Vertex AI Search: Ranking", **$1.00 per
+1,000 calls, no free tier**) made on **every `/api/search`**, so cost scales with total search
+volume (not just AI answers). Leave it off to keep the "everything on the subscription" story
+clean; turn it on when relevance sharpness + visible scores matter more. (Don't confuse this with
+`93D6-7280-CF05`, which is standalone *Enterprise search* — the SKU the billing check watches for.)
 
 **Enable declaratively (preferred)** — a deploy flag, so a later rebuild/redeploy can't silently
 drop it (Terraform pins `RERANK=on` into the Cloud Run env):

@@ -57,9 +57,10 @@
   <!-- footer: what each is for -->
   <rect x="40" y="440" width="465" height="98" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
   <text x="60" y="464" font-size="13" class="t h">Verify the cost model</text>
-  <text x="60" y="486" font-size="12" class="m">• Group by SKU: confirm no standalone Vertex AI Search</text>
-  <text x="72" y="503" font-size="12" class="m">(93D6-7280-CF05) unless the reranker is on</text>
-  <text x="60" y="522" font-size="12" class="m">• Track the Ranking API opex when --rerank is enabled</text>
+  <text x="60" y="486" font-size="12" class="m">• Standalone search (93D6-7280-CF05) should be ~$0 —</text>
+  <text x="72" y="503" font-size="12" class="m">all search rides the GE subscription</text>
+  <text x="60" y="522" font-size="12" class="m">• Reranker = "Vertex AI Search: Ranking" (EE89-3EE8-2541),</text>
+  <text x="72" y="539" font-size="12" class="m">$1/1,000, only when --rerank is on</text>
 
   <rect x="535" y="440" width="465" height="98" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
   <text x="555" y="464" font-size="13" class="t h">Troubleshoot with SQL</text>
