@@ -19,7 +19,7 @@
 
   <rect x="80" y="150" width="350" height="64" rx="12" fill="#222222"/>
   <text x="100" y="180" font-size="15" class="w h">DynamoDB — system of record</text>
-  <text x="100" y="200" font-size="12" class="w">item: id · metadata · groups · version · (REMOVE)</text>
+  <text x="100" y="200" font-size="12" class="w">item: id · metadata · groups · version</text>
   <line x1="255" y1="214" x2="255" y2="244" class="flow" marker-end="url(#arr3)"/>
 
   <rect x="80" y="246" width="350" height="56" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
