@@ -4,6 +4,7 @@ import { Wordmark } from "./Logo";
 import { HexEmblem } from "./HexEmblem";
 import { SideDock } from "./SideDock";
 import { PersonaSwitcher } from "./PersonaSwitcher";
+import { useSuggestions } from "../useSuggestions";
 import type { Persona } from "../types";
 
 const SUGGESTIONS = [
@@ -29,6 +30,7 @@ export function HeroLanding({
   onHow?: () => void;
 }) {
   const [q, setQ] = useState("");
+  const { suggestions, onQueryChange } = useSuggestions(current?.email);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (q.trim()) onSearch(q.trim());
@@ -74,10 +76,15 @@ export function HeroLanding({
             <input
               autoFocus
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => { setQ(e.target.value); onQueryChange(e.target.value); }}
               placeholder="Search across Amgen, Alphabet & research…"
+              list="ge-suggest-hero"
+              autoComplete="off"
               className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-amgen-muted"
             />
+            <datalist id="ge-suggest-hero">
+              {suggestions.map((s) => <option key={s} value={s} />)}
+            </datalist>
             <button
               type="submit"
               className="rounded-full bg-amgen-blue px-4 py-1.5 text-sm font-semibold text-white hover:bg-amgen-blueDark"

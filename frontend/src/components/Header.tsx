@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Search, X, Sparkles } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { PersonaSwitcher } from "./PersonaSwitcher";
+import { useSuggestions } from "../useSuggestions";
 import type { Persona } from "../types";
 
 /** Compact on/off switch for auto-generating the AI answer on each search. */
@@ -49,6 +50,7 @@ export function Header({
   onToggleAi: () => void;
 }) {
   const [q, setQ] = useState(query);
+  const { suggestions, onQueryChange } = useSuggestions(current?.email);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (q.trim()) onSearch(q.trim());
@@ -60,10 +62,15 @@ export function Header({
         <form onSubmit={submit} className="mx-auto flex max-w-2xl flex-1 items-center gap-2 rounded-full border border-amgen-line bg-white px-4 py-2 shadow-sm focus-within:border-amgen-blue">
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => { setQ(e.target.value); onQueryChange(e.target.value); }}
+            list="ge-suggest-header"
+            autoComplete="off"
             className="flex-1 bg-transparent text-sm text-amgen-ink outline-none placeholder:text-amgen-muted"
             placeholder="Search…"
           />
+          <datalist id="ge-suggest-header">
+            {suggestions.map((s) => <option key={s} value={s} />)}
+          </datalist>
           {q && (
             <button type="button" onClick={() => setQ("")} className="text-amgen-muted hover:text-amgen-ink">
               <X size={16} />

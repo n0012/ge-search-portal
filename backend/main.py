@@ -65,7 +65,20 @@ def get_config():
         "identitySource": config.IDENTITY_SOURCE,
         "personas": permissions.personas(),       # drives the demo persona switcher
         "facetFields": discovery.FACET_FIELDS,     # which data filters the UI may offer
+        "autocomplete": config.AUTOCOMPLETE,       # enables search-as-you-type suggestions
     }
+
+
+@app.get("/api/complete")
+def complete(request: Request):
+    """Search-as-you-type suggestions (GE completionConfig). Suggestions are query hints,
+    not documents — the search they trigger is still ACL-filtered server-side."""
+    if not config.AUTOCOMPLETE:
+        return {"suggestions": []}
+    q = (request.query_params.get("q") or "").strip()
+    if len(q) < 2:  # don't round-trip on 1 char
+        return {"suggestions": []}
+    return {"suggestions": discovery.complete(q, user_pseudo_id=_user(request))}
 
 
 def _parse_query(body):

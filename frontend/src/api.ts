@@ -35,6 +35,18 @@ export async function search(
   return r.json();
 }
 
+// Search-as-you-type suggestions (GE completionConfig). Best-effort; returns [] on error.
+// Suggestions are query hints only — the search they trigger is still ACL-filtered.
+export async function complete(q: string, user?: string): Promise<string[]> {
+  try {
+    const r = await fetch(`/api/complete?q=${encodeURIComponent(q)}`, { headers: headers(user) });
+    if (!r.ok) return [];
+    return (await r.json())?.suggestions ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // Deferred facet cascade: /api/search returns results immediately; this fetches the
 // own-excluded recount for the ACTIVELY-filtered fields, which the UI merges into
 // availableFilters (a field mapped to [] means: drop that chip group).

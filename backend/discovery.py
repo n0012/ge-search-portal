@@ -422,6 +422,77 @@ def _parse_assist_stream(text):
     return events
 
 
+def complete(query, user_pseudo_id=None):
+    """Search-as-you-type suggestions via the data store's completionConfig
+    (:completeQuery). Best-effort: any error -> []. Returns a list of suggestion strings.
+    Note: suggestions are NOT ACL-trimmed by the completion model — they're query-string
+    hints, not documents; the actual search that follows is still fully ACL-filtered."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    from urllib.parse import urlencode
+    params = {"query": q}
+    if user_pseudo_id:
+        params["userPseudoId"] = user_pseudo_id
+    url = (f"https://{config.DE_HOST}/v1/{config.DATA_STORE_PATH}:completeQuery?"
+           + urlencode(params))
+    try:
+        r = _sess().get(url, timeout=10)
+        r.raise_for_status()
+        js = r.json()
+    except Exception as e:
+        print("complete skipped: %s: %s" % (type(e).__name__, str(e)[:120]), flush=True)
+        return []
+    out, seen = [], set()
+    for s in js.get("querySuggestions", []) or []:
+        sug = (s.get("suggestion") or "").strip()
+        if sug and sug.lower() not in seen:
+            seen.add(sug.lower())
+            out.append(sug)
+    return out
+
+
+def _assist_user_metadata():
+    """AssistUserMetadata (timeZone / preferredLanguageCode) so date-relative and localized
+    answers are correct. Omitted fields when unset."""
+    md = {}
+    if config.ASSIST_TIME_ZONE:
+        md["timeZone"] = config.ASSIST_TIME_ZONE
+    if config.ASSIST_LANGUAGE:
+        md["preferredLanguageCode"] = config.ASSIST_LANGUAGE
+    return md
+
+
+def _inject_inline_citations(chunks, docs):
+    """Turn the assistant's per-chunk citationMetadata into inline [n] markers whose numbers
+    match the Sources list (docs order). chunks: list of (text, citations); each citation has
+    startIndex/endIndex (offsets within that chunk's text) + uri/title. Sources not already in
+    docs (by sourceUrl) are appended so every marker resolves. Returns the assembled text;
+    docs is extended in place. Insertions run back-to-front so earlier offsets stay valid."""
+    idx_by_uri = {}
+    for i, d in enumerate(docs):
+        if d.get("sourceUrl"):
+            idx_by_uri[d["sourceUrl"]] = i + 1  # 1-based, matches _citations() numbering
+    out = []
+    for text, citations in chunks:
+        marks = []  # (pos, "[n]")
+        for c in citations or []:
+            uri = c.get("uri")
+            if uri and uri not in idx_by_uri:
+                docs.append({"documentId": None, "title": c.get("title") or "",
+                             "sourceUrl": uri, "snippet": ""})
+                idx_by_uri[uri] = len(docs)
+            n = idx_by_uri.get(uri)
+            end = c.get("endIndex")
+            if n is None or end is None:
+                continue
+            marks.append((min(int(end), len(text)), "[%d]" % n))
+        for pos, mark in sorted(marks, reverse=True):
+            text = text[:pos] + mark + text[pos:]
+        out.append(text)
+    return "".join(out)
+
+
 def _assist_once(query, base_filter, session):
     """One :streamAssist call. Returns (text, docs, out_session, n_events). Raises on
     transport/HTTP error so the caller can retry."""
@@ -430,10 +501,15 @@ def _assist_once(query, base_filter, session):
             "toolsSpec": {"vertexAiSearchSpec": {"filter": base_filter}}}
     if session:
         body["session"] = session
+    if config.ASSIST_MODEL_ID:
+        body["generationSpec"] = {"modelId": config.ASSIST_MODEL_ID}
+    md = _assist_user_metadata()
+    if md:
+        body["userMetadata"] = md
     r = _sess().post(url, json=body, timeout=120)
     r.raise_for_status()
     events = _parse_assist_stream(r.text)
-    parts, refs, out_session = [], [], None
+    chunks, refs, out_session = [], [], None
     for ev in events:
         si = ev.get("sessionInfo", {}) or {}
         if si.get("session"):
@@ -444,9 +520,15 @@ def _assist_once(query, base_filter, session):
             # `parts[]`; `thought: true` chunks are model reasoning, not answer text.
             content = gc.get("content", {}) or {}
             if content.get("text") and not content.get("thought"):
-                parts.append(content["text"])
+                cites = (gc.get("citationMetadata", {}) or {}).get("citations", []) or []
+                chunks.append((content["text"], cites))
             refs.extend((gc.get("textGroundingMetadata", {}) or {}).get("references", []) or [])
-    return "".join(parts), _assist_refs_to_docs(refs), out_session, len(events)
+    docs = _assist_refs_to_docs(refs)
+    if config.ASSIST_INLINE_CITATIONS:
+        text = _inject_inline_citations(chunks, docs)  # may extend docs with citation-only sources
+    else:
+        text = "".join(t for t, _ in chunks)
+    return text, docs, out_session, len(events)
 
 
 def assist(query, doc_ids, base_filter="", session=None, require_grounding=True):

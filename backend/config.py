@@ -55,6 +55,22 @@ RERANK_TOP_N = int(_b("RERANK_TOP_N", "50"))
 # and grounding prompt — snippets are keyword fragments and score low on the cross-encoder.
 RERANK_EXTRACTIVE = _b("RERANK_EXTRACTIVE", "on").lower() == "on"
 
+# --- GE assistant (:streamAssist) options ------------------------------------------
+# Pin the generation model for the assistant (generationSpec.modelId). Empty = the GE
+# engine's default (recommended — the engine picks a covered model). Set only if you need
+# a specific model and have confirmed it's available + subscription-covered for your tier.
+ASSIST_MODEL_ID = _b("ASSIST_MODEL_ID", "")
+# userMetadata sent with each assist call so date-relative ("this quarter") and localized
+# answers are correct. TIME_ZONE is an IANA name (e.g. "America/Los_Angeles"); LANGUAGE is
+# a BCP-47 code (e.g. "en"). Empty = omit that field.
+ASSIST_TIME_ZONE = _b("ASSIST_TIME_ZONE", "")
+ASSIST_LANGUAGE = _b("ASSIST_LANGUAGE", "")
+# Inject inline [n] citation markers into the answer text from the assistant's
+# citationMetadata (offsets → the same numbered Sources list). off = Sources list only.
+ASSIST_INLINE_CITATIONS = _b("ASSIST_INLINE_CITATIONS", "on").lower() == "on"
+# Search-as-you-type autocomplete via the engine completionConfig:completeQuery.
+AUTOCOMPLETE = _b("AUTOCOMPLETE", "on").lower() == "on"
+
 # BigQuery logging (searches + feedback)
 BQ_LOGGING = _b("BQ_LOGGING", "on")               # on | off
 BQ_DATASET = _b("BQ_DATASET", "ge_search_logs")

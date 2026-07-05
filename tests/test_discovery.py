@@ -367,3 +367,67 @@ def test_doc_content_empty_source_url_noops(monkeypatch):
     s = _FakeSession()
     monkeypatch.setattr(discovery, "_session", s)
     assert discovery.doc_content("", "T", 'acl_groups: ANY("finance")') == "" and s.calls == []
+
+
+def test_assist_sends_generationspec_and_usermetadata(monkeypatch):
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "ASSIST_MODEL_ID", "gemini-2.5-flash")
+    monkeypatch.setattr(discovery.config, "ASSIST_TIME_ZONE", "America/Los_Angeles")
+    monkeypatch.setattr(discovery.config, "ASSIST_LANGUAGE", "en")
+    discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    body = s.calls[0]["body"]
+    assert body["generationSpec"]["modelId"] == "gemini-2.5-flash"
+    assert body["userMetadata"]["timeZone"] == "America/Los_Angeles"
+    assert body["userMetadata"]["preferredLanguageCode"] == "en"
+
+
+def test_assist_omits_generationspec_when_unset(monkeypatch):
+    s = _AssistSession()
+    monkeypatch.setattr(discovery, "_session", s)
+    monkeypatch.setattr(discovery.config, "ASSIST_MODEL_ID", "")
+    monkeypatch.setattr(discovery.config, "ASSIST_TIME_ZONE", "")
+    monkeypatch.setattr(discovery.config, "ASSIST_LANGUAGE", "")
+    discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    body = s.calls[0]["body"]
+    assert "generationSpec" not in body and "userMetadata" not in body
+
+
+def test_assist_injects_inline_citations(monkeypatch):
+    # citationMetadata offsets -> inline [n] markers matching the Sources list order
+    class _Cited:
+        calls = []
+        def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+            _Cited.calls.append({"url": url, "body": json})
+            return _Resp([{"answer": {"replies": [{"groundedContent": {
+                "content": {"role": "model", "text": "Revenue rose sharply."},
+                "textGroundingMetadata": {"references": [{"content": "c",
+                    "documentMetadata": {"document": "x/d1", "uri": "https://x/d1", "title": "D1"}}]},
+                "citationMetadata": {"citations": [{"startIndex": 0, "endIndex": 21, "uri": "https://x/d1", "title": "D1"}]},
+            }}]}}])
+    monkeypatch.setattr(discovery, "_session", _Cited())
+    monkeypatch.setattr(discovery.config, "ASSIST_INLINE_CITATIONS", True)
+    text, docs, _ = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    assert text == "Revenue rose sharply.[1]"
+    assert docs[0]["sourceUrl"] == "https://x/d1"
+
+
+def test_complete_returns_suggestions(monkeypatch):
+    class _Comp:
+        calls = []
+        def get(self, url, timeout=None):
+            _Comp.calls.append(url)
+            return _Resp({"querySuggestions": [{"suggestion": "amgen revenue"}, {"suggestion": "amgen pipeline"}, {"suggestion": "amgen revenue"}]})
+    monkeypatch.setattr(discovery, "_session", _Comp())
+    out = discovery.complete("amgen")
+    assert out == ["amgen revenue", "amgen pipeline"]  # deduped, order preserved
+    assert ":completeQuery?query=amgen" in _Comp.calls[0]
+
+
+def test_complete_empty_query_noops(monkeypatch):
+    class _Comp:
+        calls = []
+        def get(self, url, timeout=None):
+            _Comp.calls.append(url); return _Resp({})
+    monkeypatch.setattr(discovery, "_session", _Comp())
+    assert discovery.complete("") == [] and _Comp.calls == []
