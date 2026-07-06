@@ -394,22 +394,39 @@ def test_assist_omits_generationspec_when_unset(monkeypatch):
 
 
 def test_assist_injects_inline_citations(monkeypatch):
-    # citationMetadata offsets -> inline [n] markers matching the Sources list order
-    class _Cited:
+    # textGroundingMetadata.segments (byte offsets + referenceIndices) -> inline [n] markers
+    # numbered to match the Sources list. (citationMetadata is empty on the live engine.)
+    class _Seg:
         calls = []
         def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
-            _Cited.calls.append({"url": url, "body": json})
+            _Seg.calls.append({"url": url, "body": json})
             return _Resp([{"answer": {"replies": [{"groundedContent": {
                 "content": {"role": "model", "text": "Revenue rose sharply."},
-                "textGroundingMetadata": {"references": [{"content": "c",
-                    "documentMetadata": {"document": "x/d1", "uri": "https://x/d1", "title": "D1"}}]},
-                "citationMetadata": {"citations": [{"startIndex": 0, "endIndex": 21, "uri": "https://x/d1", "title": "D1"}]},
+                "textGroundingMetadata": {
+                    "references": [{"content": "c", "documentMetadata": {"document": "x/d1", "uri": "https://x/d1", "title": "D1"}}],
+                    "segments": [{"startIndex": "0", "endIndex": "21", "referenceIndices": [0], "groundingScore": 0.9}],
+                },
             }}]}}])
-    monkeypatch.setattr(discovery, "_session", _Cited())
+    monkeypatch.setattr(discovery, "_session", _Seg())
     monkeypatch.setattr(discovery.config, "ASSIST_INLINE_CITATIONS", True)
     text, docs, _ = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
     assert text == "Revenue rose sharply.[1]"
     assert docs[0]["sourceUrl"] == "https://x/d1"
+
+
+def test_assist_inline_citations_off_leaves_text_plain(monkeypatch):
+    class _Seg:
+        def post(self, url, json=None, timeout=None, headers=None):  # noqa: A002
+            return _Resp([{"answer": {"replies": [{"groundedContent": {
+                "content": {"role": "model", "text": "Revenue rose sharply."},
+                "textGroundingMetadata": {
+                    "references": [{"content": "c", "documentMetadata": {"document": "x/d1", "uri": "https://x/d1", "title": "D1"}}],
+                    "segments": [{"endIndex": "21", "referenceIndices": [0]}],
+                }}}]}}])
+    monkeypatch.setattr(discovery, "_session", _Seg())
+    monkeypatch.setattr(discovery.config, "ASSIST_INLINE_CITATIONS", False)
+    text, docs, _ = discovery.assist("q", ["a"], 'acl_groups: ANY("finance")')
+    assert text == "Revenue rose sharply." and len(docs) == 1
 
 
 def test_complete_returns_suggestions(monkeypatch):

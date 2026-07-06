@@ -463,34 +463,40 @@ def _assist_user_metadata():
     return md
 
 
-def _inject_inline_citations(chunks, docs):
-    """Turn the assistant's per-chunk citationMetadata into inline [n] markers whose numbers
-    match the Sources list (docs order). chunks: list of (text, citations); each citation has
-    startIndex/endIndex (offsets within that chunk's text) + uri/title. Sources not already in
-    docs (by sourceUrl) are appended so every marker resolves. Returns the assembled text;
-    docs is extended in place. Insertions run back-to-front so earlier offsets stay valid."""
-    idx_by_uri = {}
-    for i, d in enumerate(docs):
-        if d.get("sourceUrl"):
-            idx_by_uri[d["sourceUrl"]] = i + 1  # 1-based, matches _citations() numbering
-    out = []
-    for text, citations in chunks:
-        marks = []  # (pos, "[n]")
-        for c in citations or []:
-            uri = c.get("uri")
-            if uri and uri not in idx_by_uri:
-                docs.append({"documentId": None, "title": c.get("title") or "",
-                             "sourceUrl": uri, "snippet": ""})
-                idx_by_uri[uri] = len(docs)
-            n = idx_by_uri.get(uri)
-            end = c.get("endIndex")
-            if n is None or end is None:
-                continue
-            marks.append((min(int(end), len(text)), "[%d]" % n))
-        for pos, mark in sorted(marks, reverse=True):
-            text = text[:pos] + mark + text[pos:]
-        out.append(text)
-    return "".join(out)
+def _ref_key(ref):
+    """Stable identity for a grounding reference — its document resource name, else uri."""
+    meta = ref.get("documentMetadata") or {}
+    return (meta.get("document") or meta.get("uri") or "").strip()
+
+
+def _inject_segment_citations(text, segments, local_nums):
+    """Insert inline [n] markers into one reply chunk from its textGroundingMetadata.segments.
+    Each segment has byte offsets (startIndex/endIndex into THIS chunk's utf-8 text) and
+    referenceIndices into the chunk's local references; local_nums maps those to global
+    Sources numbers. Offsets are BYTES, so we splice on the encoded bytes and insert
+    back-to-front so earlier positions stay valid. (citationMetadata is empty on this engine;
+    segments is the populated grounding-support structure.)"""
+    marks = []  # (byte_pos, "[n][m]")
+    for seg in segments or []:
+        end = seg.get("endIndex")
+        if end is None:
+            continue
+        nums = []
+        for ri in seg.get("referenceIndices", []) or []:
+            n = local_nums[ri] if 0 <= ri < len(local_nums) else None
+            if n:
+                nums.append(n)
+        if not nums:
+            continue
+        marker = "".join("[%d]" % n for n in dict.fromkeys(nums))  # dedup, keep order
+        marks.append((int(end), marker))
+    if not marks:
+        return text
+    b = text.encode("utf-8")
+    for pos, marker in sorted(marks, reverse=True):
+        pos = max(0, min(pos, len(b)))
+        b = b[:pos] + marker.encode("utf-8") + b[pos:]
+    return b.decode("utf-8", "ignore")
 
 
 def _assist_once(query, base_filter, session):
@@ -509,7 +515,7 @@ def _assist_once(query, base_filter, session):
     r = _sess().post(url, json=body, timeout=120)
     r.raise_for_status()
     events = _parse_assist_stream(r.text)
-    chunks, refs, out_session = [], [], None
+    parts, docs, key_to_num, out_session = [], [], {}, None
     for ev in events:
         si = ev.get("sessionInfo", {}) or {}
         if si.get("session"):
@@ -519,16 +525,26 @@ def _assist_once(query, base_filter, session):
             # AssistantContent carries the text directly (`content.text`), not a Gemini-style
             # `parts[]`; `thought: true` chunks are model reasoning, not answer text.
             content = gc.get("content", {}) or {}
-            if content.get("text") and not content.get("thought"):
-                cites = (gc.get("citationMetadata", {}) or {}).get("citations", []) or []
-                chunks.append((content["text"], cites))
-            refs.extend((gc.get("textGroundingMetadata", {}) or {}).get("references", []) or [])
-    docs = _assist_refs_to_docs(refs)
-    if config.ASSIST_INLINE_CITATIONS:
-        text = _inject_inline_citations(chunks, docs)  # may extend docs with citation-only sources
-    else:
-        text = "".join(t for t, _ in chunks)
-    return text, docs, out_session, len(events)
+            if not (content.get("text") and not content.get("thought")):
+                continue
+            tgm = gc.get("textGroundingMetadata", {}) or {}
+            local_refs = tgm.get("references", []) or []
+            # register this chunk's refs into the global Sources list (order-preserving,
+            # deduped by document identity) and remember each one's global 1-based number
+            local_nums = []
+            for ref in local_refs:
+                k = _ref_key(ref)
+                if k and k not in key_to_num:
+                    mapped = _assist_refs_to_docs([ref])
+                    if mapped:
+                        docs.append(mapped[0])
+                        key_to_num[k] = len(docs)
+                local_nums.append(key_to_num.get(k))
+            text = content["text"]
+            if config.ASSIST_INLINE_CITATIONS:
+                text = _inject_segment_citations(text, tgm.get("segments", []), local_nums)
+            parts.append(text)
+    return "".join(parts), docs, out_session, len(events)
 
 
 def assist(query, doc_ids, base_filter="", session=None, require_grounding=True):
