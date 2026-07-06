@@ -52,27 +52,9 @@ full design rationale · [`INGEST.md`](./INGEST.md) — initial-load + **increme
 
 ## Architecture
 
-```
-                  ┌─────────────────────── Cloud Run service (IAP on) ───────────────────────┐
-Browser ─IAP─▶ React SPA ─/api─▶ FastAPI (app SA, read-only)                                  │
-                  │  1. identity (IAP header / demo persona)                                   │
-                  │  2. user → groups ─────────────────────▶ Firestore (group_users, live)     │
-                  │  3. /api/search: VAIS filter acl_groups: ANY(groups) + cascading facets    │
-                  │     ──────────────────────────────────▶ Vertex AI Search (server-side trim)│
-                  │  3b. semantic re-rank the trimmed set ──▶ Ranking API (before results + AI) │
-                  │  4. live re-verify the page vs Firestore (defense-in-depth)                 │
-                  │  5. /api/answer (opt-in): GE assistant (:streamAssist), acl_groups-scoped   │
-                  │  6. /api/doc/{id}: ACL-checked signed URL to the imported GCS copy          │
-                  │  7. log search/feedback ───────────────▶ BigQuery ge_search_logs.*          │
-                  └────────────────────────────────────────────────────────────────────────────┘
+![Gemini Enterprise Search Portal — Google Cloud architecture](./frontend/public/diagrams/arch-overview.png)
 
-Ingestion:   Firestore `catalog` (on-ramp) ──▶ reconcile Cloud Run Job (Cloud Scheduler) ──▶
-             stage→GCS, documents:import/delete→VAIS, seed ACL graph, BigQuery ledger.
-             Upstream catalog writer = DynamoDB-Streams→Lambda OR replicate_catalog.py (pluggable).
-             Initial bulk load = ge-search-ingest Job (fetch corpus → import → seed → schema/sync).
-Provisioning: Terraform (APIs, GCS, Firestore, VAIS data store, SAs/IAM, Cloud Run svc+jobs, Scheduler, BigQuery)
-Image:        Cloud Build (one image serves the SPA+API and runs both jobs)
-```
+> **Request flow (1–6):** the browser reaches the Cloud Run service through **IAP**; FastAPI (read-only app SA) resolves the caller's **groups in Firestore**, runs an **ACL-trimmed** query against **Vertex AI Search / Gemini Enterprise** (`acl_groups` filter), **re-ranks** the trimmed set, and — on opt-in — grounds an AI answer via **`streamAssist`**. Document access is a signed URL to the imported **Cloud Storage** copy; searches and feedback land in **BigQuery**. Ingestion & ops (Scheduler → reconcile Job → import; optional AWS DynamoDB source; Terraform + Cloud Build) run alongside.
 
 Cleanly separated planes: **Terraform = infra**, **Cloud Build = image/deploy**,
 **Cloud Run Jobs = ingestion** (bulk `ge-search-ingest` + scheduled incremental
