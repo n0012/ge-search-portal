@@ -34,7 +34,7 @@ def _sess():
 
 # Facets offered to the UI as data filters (separate from the ACL trim).
 FACET_FIELDS = ["company", "report_kind", "research_source", "research_area",
-                "doc_type", "year"]
+                "doc_type", "year", "quarter"]
 
 
 def _search(query, page_size, summary=False, filter_="", facet_fields=None, retry_empty=False):

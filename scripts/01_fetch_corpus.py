@@ -476,11 +476,15 @@ def fetch_edgar(company, cik, limit, forms=None):
     rec = (j.get("filings", {}) or {}).get("recent", {}) or {}
     allforms, accs = rec.get("form", []), rec.get("accessionNumber", [])
     prims, dates = rec.get("primaryDocument", []), rec.get("filingDate", [])
-    cands = [(allforms[i], accs[i], prims[i], dates[i]) for i in range(len(allforms))
+    # reportDate = the fiscal PERIOD-OF-REPORT end date (authoritative for quarter/FY),
+    # distinct from filingDate. Missing on some filings -> "".
+    rdates = rec.get("reportDate", [])
+    cands = [(allforms[i], accs[i], prims[i], dates[i],
+              rdates[i] if i < len(rdates) else "") for i in range(len(allforms))
              if allforms[i] in forms and prims[i].lower().endswith((".htm", ".html"))]
     cands = shard(cands)
     got = 0
-    for form, acc, prim, date in cands:
+    for form, acc, prim, date, rdate in cands:
         if got >= limit:
             break
         did = re.sub(r"[^a-z0-9_-]", "_", f"{company}_{form}_{date}".lower())[:63]
@@ -495,6 +499,7 @@ def fetch_edgar(company, cik, limit, forms=None):
         row = dict(id=did, department="finance", company=company, doc_type=form,
                    report_kind=EDGAR_KIND.get(form, "filing"),
                    title=f"{company.title()} {form} {date}", year=date[:4],
+                   period_end=rdate or None,  # fiscal period end -> quarter/FY in 02
                    source_url=url, pdf=os.path.relpath(dest, ROOT))
         record(**{k: v for k, v in row.items() if v})
         dlog("fetched", company, did, bytes=size, year=date[:4], doc_type=form)

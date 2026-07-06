@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   doc_type: "Type",
   research_area: "Area",
   year: "Year",
+  quarter: "Quarter",
 };
 
 /**
