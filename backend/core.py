@@ -29,12 +29,17 @@ def parse_doc(result):
     dd = d.get("derivedStructData", {}) or {}
     snippet = next((s.get("snippet", "") for s in (dd.get("snippets") or [])
                     if s.get("snippet")), "")
+    # Extractive segments are longer, coherent verbatim passages (not keyword snippets) — far
+    # better answer-bearing context for the cross-encoder reranker and the grounding prompt.
+    segs = dd.get("extractive_segments") or []
+    segment = "\n\n".join(s.get("content", "") for s in segs if s.get("content"))
     return {
         "documentId": d.get("id"),
         "title": sd.get("title") or dd.get("title") or d.get("id"),
         "sourceUrl": sd.get("source_url") or dd.get("link"),
         "gcsUri": dd.get("link"),
         "snippet": snippet,
+        "segment": segment,
         "company": sd.get("company"), "department": sd.get("department"),
         "doc_type": sd.get("doc_type"), "report_kind": sd.get("report_kind"),
         "research_source": sd.get("research_source"),
@@ -69,8 +74,9 @@ def build_prompt(query, docs):
     """Grounding prompt for the answer model (text sources + optional attached PDFs)."""
     if not docs:
         return ""
-    sources = "\n\n".join(f"[{i + 1}] {d.get('title', '')}\n{d.get('snippet', '')}"
-                          for i, d in enumerate(docs[:8]))
+    sources = "\n\n".join(
+        f"[{i + 1}] {d.get('title', '')}\n{d.get('segment') or d.get('snippet') or ''}"
+        for i, d in enumerate(docs[:8]))
     return ("You are an enterprise search assistant. Using the numbered sources below (and any "
             "attached document pages — read their charts, tables and figures), write a clear, "
             "well-structured answer that synthesizes across the sources, with inline citations "

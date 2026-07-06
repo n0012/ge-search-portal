@@ -9,6 +9,12 @@ resource "google_cloud_run_v2_service" "app" {
 
   template {
     service_account = google_service_account.app.email
+    # min_instances=1 keeps one warm instance so deploys/idle don't cold-start (removes the
+    # ~10s first-hit latency and empty-during-rollout blips). Costs one always-on instance;
+    # default 0 keeps net-new installs scale-to-zero cheap. deploy-all.sh flag: --warm.
+    scaling {
+      min_instance_count = var.min_instances
+    }
     containers {
       image = local.placeholder_image
       ports { container_port = 8080 }
@@ -30,6 +36,16 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.data_store_id
       }
       env {
+        # GE engine: app queries its serving config (:search) + assistant (:streamAssist) so all
+        # traffic is covered by the GE subscription (not billed standalone).
+        name  = "ENGINE_ID"
+        value = google_discovery_engine_search_engine.engine.engine_id
+      }
+      env {
+        name  = "ASSISTANT_ID"
+        value = var.assistant_id
+      }
+      env {
         name  = "PERMISSION_BACKEND"
         value = "firestore"
       }
@@ -42,14 +58,6 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.identity_source
       }
       env {
-        name  = "ANSWER_MODE"
-        value = "gemini"
-      }
-      env {
-        name  = "GEMINI_MODEL"
-        value = var.gemini_model
-      }
-      env {
         name  = "BQ_LOGGING"
         value = "on"
       }
@@ -57,13 +65,13 @@ resource "google_cloud_run_v2_service" "app" {
         name  = "BQ_DATASET"
         value = google_bigquery_dataset.logs.dataset_id
       }
+      # Optional cross-encoder Ranking API (SKU 93D6-7280-CF05) — declaratively enabled so a
+      # rebuild/redeploy can't silently drop it. When on, EVERY /api/search makes one Ranking
+      # API call (cost scales with search volume, not just AI turns). Off keeps all traffic on
+      # the GE subscription. Track spend via the billing export (sql/analytics.sql).
       env {
-        name  = "MULTIMODAL_ANSWERS"
-        value = var.multimodal_answers
-      }
-      env {
-        name  = "MULTIMODAL_MODEL"
-        value = var.multimodal_model
+        name  = "RERANK"
+        value = var.enable_rerank ? "on" : "off"
       }
     }
   }
@@ -73,7 +81,8 @@ resource "google_cloud_run_v2_service" "app" {
     ignore_changes = [template[0].containers[0].image]
   }
 
-  depends_on = [google_project_service.apis, google_firestore_database.default]
+  depends_on = [google_project_service.apis, google_firestore_database.default,
+  google_discovery_engine_search_engine.engine]
 }
 
 # IAP service agent invokes the Cloud Run service on the authenticated user's behalf.

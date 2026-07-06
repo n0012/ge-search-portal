@@ -22,4 +22,4 @@ dependencies = [
 # Flat layout: declare the modules explicitly (setuptools won't auto-discover them).
 [tool.setuptools]
 py-modules = ["main", "config", "core", "discovery", "permissions",
-              "generate", "identity", "bqlog"]
+              "identity", "bqlog"]

@@ -5,6 +5,10 @@ Stand up the full demo in one command. Self-contained: this directory has everyt
 
 ## Prerequisites
 - A **GCP project** with **billing enabled** and you as **Owner** (or Editor + Project IAM Admin).
+- A **Gemini Enterprise subscription** in that project (answers come from the GE assistant, and
+  the whole point is subscription-covered billing). No seats yet? See
+  [Provision the GE subscription/license](#provision-the-ge-subscriptionlicense) below — a
+  30-day free trial can be provisioned entirely via API after the infra step.
 - Local tools: **`gcloud`**, **`terraform`** (≥1.5). (Node/Python are only needed for local dev —
   the deploy builds the image in Cloud Build, not on your machine.)
 - Authenticate once:
@@ -36,6 +40,107 @@ This runs three steps (override with `--steps infra,build,data`):
   populate a few minutes later.)
 
 When it finishes it prints the IAP-gated **Service URL**. Open it as an authorized user.
+
+## Provision the GE subscription/license
+
+The GE engine and its `default_assistant` are created by Terraform, but `:streamAssist` only
+serves once the project has an **ACTIVE licenseConfig**. One command (after the infra step):
+
+```bash
+bash scripts/setup_ge_license.sh YOUR_PROJECT_ID you@your-domain.com
+```
+
+That provisions a **30-day free trial** (50 seats, Search + Assistant tier), wires it as the
+user store default with seat auto-register, and optionally pre-assigns the given user a seat.
+Paid tiers are purchased through Cloud Billing / the Gemini Enterprise console instead — the
+create API only permits free trials. It works for the app's service account too — no per-SA
+seat needed, the project-level subscription is what matters.
+
+<details><summary>What the script calls (reference)</summary>
+
+```bash
+P=YOUR_PROJECT_ID
+TOKEN=$(gcloud auth print-access-token)
+# 1. 30-day free trial (licenseConfigs.create is only allowed for free trials —
+#    paid tiers go through billing/procurement). startDate must be a FUTURE date,
+#    but the config comes back ACTIVE immediately.
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" \
+  -H "Content-Type: application/json" \
+  "https://discoveryengine.googleapis.com/v1alpha/projects/$P/locations/global/licenseConfigs?licenseConfigId=free_trial_gemini" \
+  -d '{"licenseCount": "50", "subscriptionTier": "SUBSCRIPTION_TIER_SEARCH_AND_ASSISTANT",
+       "subscriptionTerm": "SUBSCRIPTION_TERM_ONE_MONTH", "freeTrial": true,
+       "startDate": {"year": YYYY, "month": M, "day": TOMORROW}}'
+# 2. make it the user store default (auto-assigns seats on first login)
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" \
+  -H "Content-Type: application/json" \
+  "https://discoveryengine.googleapis.com/v1alpha/projects/$P/locations/global/userStores/default_user_store?updateMask=defaultLicenseConfig,enableLicenseAutoRegister" \
+  -d "{\"defaultLicenseConfig\": \"projects/$P/locations/global/licenseConfigs/free_trial_gemini\",
+       \"enableLicenseAutoRegister\": true}"
+# 3. (optional) pre-assign a seat to a human user via
+#    userStores/default_user_store:batchUpdateUserLicenses
+```
+
+</details>
+
+Gotchas (all hit on a real fresh install):
+- `default_user_store` only exists **after** the GE engine is created — run the infra step first
+  (404 "User store ... does not exist" otherwise).
+- Without an active licenseConfig, assist calls fail with *"User must be assigned a license"*.
+- The trial expires after one month; check state with
+  `GET /v1alpha/projects/$P/locations/global/licenseConfigs`.
+
+## Optional: analytics exports to BigQuery
+
+Both are off by default and flag-gated on the infra step (idempotent — re-run anytime):
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --billing-export --logging-export
+```
+- `--billing-export` — provisions dataset `billing_export` + the billing service-agent
+  grant, so per-SKU cost is queryable (e.g. prove **no** standalone Vertex AI Search SKU
+  `93D6-7280-CF05` accrues). **One-time Console step remains** (Google exposes no API for
+  it): Billing → Billing export → BigQuery export → *Detailed usage cost* → Edit settings
+  → this project + `billing_export`. Export starts from enablement; it does not backfill.
+- `--logging-export` — fully automated: a Cloud Logging sink streams the Cloud Run
+  service + job logs into dataset `ge_search_app_logs` (date-partitioned tables per log
+  stream) for SQL over latency, errors, assist events, and ingest runs.
+
+## Optional: sharper ranking via the Ranking API (extra opex)
+
+The demo runs on the GE engine's **native** hybrid ranking — strong, and fully covered by the
+GE subscription (no per-query ranking charge). If a given audience wants tighter relevance
+ordering **and** the visible per-result relevance scores, you can turn on the Discovery Engine
+cross-encoder **Ranking API** (`rankingConfigs:rank`). It re-scores the ACL-trimmed results
+against the full query before they're shown (and before the AI answer grounds on them).
+
+**Trade-off — this is the one thing that bills outside the subscription.** The Ranking API is a
+standalone Vertex AI Search call (SKU `EE89-3EE8-2541`, "Vertex AI Search: Ranking", **$1.00 per
+1,000 calls, no free tier**) made on **every `/api/search`**, so cost scales with total search
+volume (not just AI answers). Leave it off to keep the "everything on the subscription" story
+clean; turn it on when relevance sharpness + visible scores matter more. (Don't confuse this with
+`93D6-7280-CF05`, which is standalone *Enterprise search* — the SKU the billing check watches for.)
+
+**Enable declaratively (preferred)** — a deploy flag, so a later rebuild/redeploy can't silently
+drop it (Terraform pins `RERANK=on` into the Cloud Run env):
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --rerank
+# revert: re-run --steps infra WITHOUT --rerank (enable_rerank defaults false)
+```
+Ad-hoc runtime flip (not persisted in Terraform — the next infra apply reverts it):
+```bash
+gcloud run services update ge-search-portal --region us-central1 --project YOUR_PROJECT_ID \
+  --update-env-vars RERANK=on          # RERANK_TOP_N (default 50), RERANK_MODEL also tunable
+```
+
+**Track the cost.** Enable both exports alongside it so spend is observable:
+```bash
+bash deploy-all.sh YOUR_PROJECT_ID --steps infra --rerank --billing-export --logging-export
+```
+Then `sql/analytics.sql` has two ready queries: **(9)** actual Ranking API $/day by SKU from the
+billing export, and **(10)** rerank call volume/day (the cost driver) from the logging export —
+divide to get an effective per-call rate. The reranker fails open (any Ranking API error →
+native order), so it never breaks search even if you later disable the API or hit a quota.
+`RERANK_EXTRACTIVE` (on by default) is unrelated to this billing — it only enriches result
+snippets with extractive passages from `:search` and is covered by the subscription; leave it on.
 
 ## 3. Verify
 ```bash
@@ -71,15 +176,53 @@ filters via their own `group_users` (so for real use you'd seed your actual user
 - **IAP consent screen (brand):** enabling IAP on Cloud Run may require the project's OAuth
   consent screen to exist. If `terraform apply` reports a missing IAP brand, create it once in
   the console (APIs & Services → OAuth consent screen, Internal) and re-run `--steps infra`.
-- **AI model availability:** AI answers use `gemini_model` (default `gemini-3.5-flash`) with
-  failover to `gemini_pro_model`. If those aren't enabled in your project/region, set
-  `gemini_model`/`gemini_pro_model` in `terraform.tfvars` to a model you have. **Search itself
-  is LLM-free**, so the core demo works even before AI models are sorted out (AI is opt-in).
+- **All traffic must hit the GE engine (billing).** Discovery Engine billing is determined by the
+  **engine you query**: calls to a **Gemini Enterprise engine's** serving config are covered by the
+  per-seat GE subscription; calls to the **data store directly** (or a non-GE VAIS engine) bill
+  standalone (SKU `93D6-7280-CF05`). So the app routes **both** `:search` and the assistant
+  (`:streamAssist`) at the GE engine. Terraform creates
+  `google_discovery_engine_search_engine.engine` (`app_type = APP_TYPE_INTRANET`, `engine_id`
+  default `ge-search-app`) over the data store and sets `ENGINE_ID`/`ASSISTANT_ID` on the Cloud
+  Run service. **`ENGINE_ID` must be a genuine GE engine** — verify after deploy that no
+  `93D6-7280-CF05` charges accrue (see the billing check below). If a Terraform-created engine
+  isn't billed as GE, create the app in the Gemini Enterprise console and set `engine_id` to it.
+  Requires an active GE subscription (see the license section above). IAM: the app SA's custom
+  role adds `discoveryengine.assistants.assist`; the ingest SA gets a narrow
+  `discoveryengine.schemas.update` custom role (`roles/discoveryengine.editor` does NOT include
+  it, and ingest step 5 needs it to declare `acl_groups` filterable).
+- **Give the index ~an hour to settle on a fresh install.** After the first import (and after the
+  `acl_groups` schema change), the assistant's search tool is flaky: intermittent empty grounding,
+  "internal system error" answer text, and occasional empty `:search` responses for long
+  natural-language queries. This is (re)indexing propagation, not a config error — it settles as
+  indexing completes. `scripts/fix_schema.py` handles the related type gotcha automatically (once
+  docs are imported, auto-detection types `acl_groups` as an array and the type can't be altered).
+- **Assistant filter semantics (why the app filters the way it does).** At `:streamAssist`,
+  `toolsSpec.vertexAiSearchSpec.filter` with **indexed struct fields** (`acl_groups`, `company`,
+  AND-combos) is honored and enforced. `id: ANY(...)` is **not** filterable on a GE engine, and
+  `dataStoreSpecs[].filter` is silently **ignored** on single-data-store engines — don't rely on
+  either for security. Keyword-form queries are skipped (`NON_ASSIST_SEEKING_QUERY_IGNORED`);
+  the app wraps them in an explicit summarize ask.
+- **Domain-restricted-sharing orgs (e.g. Argolis):** `iap_members` must be identities the org
+  policy `iam.allowedPolicyMemberDomains` allows (in-directory). With no `terraform.tfvars`,
+  `deploy-all.sh` auto-grants the deploying gcloud account, which always satisfies DRS.
+- **Answers are text-grounded (no separate Gemini billing).** The GE assistant grounds on indexed
+  text/extractive segments — it does not do vision over raw PDF page images. We deliberately do
+  **not** make direct Vertex Gemini calls (which would bill separately per token, outside the
+  subscription), so every AI call stays covered. The standalone cross-encoder Ranking API is also
+  **off by default** (`RERANK=off`) for the same reason.
+- **Billing check (do this after deploy):** run a batch of searches + answers, then in Cloud
+  Billing → Reports group by **SKU** and confirm **no `93D6-7280-CF05`** charges — i.e. traffic is
+  attributed to the GE subscription, not standalone Vertex AI Search.
 - **Demo vs real identity:** the demo runs `identity_source = "demo"` (persona switcher drives
   ACL). For real per-user filtering set `identity_source = "iap"` and seed real users into
   Firestore `group_users`. See README → "Identity & access".
 - **Corpus reachability:** the ingest job fetches public docs from the internet; egress is on by
   default on Cloud Run. Counts are best-effort and logged to `ge_search_logs.ingestion_log`.
+- **SEC EDGAR User-Agent:** EDGAR requires a descriptive User-Agent with a real contact and
+  throttles/blocks generic ones — so the default (`contact@example.com`) may return few or no
+  filings. Set `EDGAR_UA` on the ingest job before the data step, e.g.
+  `EDGAR_UA="yourorg-search you@yourorg.com"` (add it to the `ge-search-ingest` job env or pass
+  via the job's environment), then re-run `--steps data`.
 - **Re-installing on the SAME project:** a first install is clean. But if you `terraform destroy`
   and immediately reinstall, the VAIS data store deletes **asynchronously (can take hours)** and
   the same `data_store_id` can't be recreated until it finishes — set a new `data_store_id` in

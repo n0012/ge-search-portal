@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 560" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.6;fill:none}
+    </style>
+  </defs>
+  <rect width="1040" height="560" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Optional exports — billing &amp; platform logs in BigQuery</text>
+  <text x="40" y="70" font-size="13" class="m">Both off by default, flag-gated on the infra step (--billing-export / --logging-export). They add platform-level data on top of the app's own ge_search_logs.</text>
+
+  <!-- ===== Billing lane ===== -->
+  <text x="60" y="104" font-size="14" class="t h">Billing export  <tspan class="m" font-weight="400">(--billing-export)</tspan></text>
+
+  <rect x="60" y="116" width="410" height="48" rx="11" fill="#15909C"/>
+  <text x="80" y="140" font-size="13" class="w h">Cloud Billing account</text>
+  <text x="80" y="157" font-size="11.5" class="w">per-SKU usage &amp; cost</text>
+  <line x1="265" y1="164" x2="265" y2="190" class="flow" marker-end="url(#arr6)"/>
+
+  <rect x="60" y="192" width="410" height="52" rx="11" fill="#FFF7E6" stroke="#E0A100" stroke-width="1.5"/>
+  <text x="80" y="214" font-size="12.5" class="t h">△ One-time Console step (no API exists)</text>
+  <text x="80" y="232" font-size="11.5" class="m">Billing → Billing export → Detailed usage cost → this dataset</text>
+  <line x1="265" y1="244" x2="265" y2="270" class="flow" marker-end="url(#arr6)"/>
+
+  <rect x="60" y="272" width="410" height="58" rx="11" fill="#0056B3"/>
+  <text x="80" y="296" font-size="13" class="w h">BigQuery · billing_export</text>
+  <text x="80" y="315" font-size="11.5" class="w">detailed usage cost, queryable by SKU (starts at enable; no backfill)</text>
+
+  <!-- ===== Logging lane ===== -->
+  <text x="570" y="104" font-size="14" class="t h">Logging export  <tspan class="m" font-weight="400">(--logging-export)</tspan></text>
+
+  <rect x="570" y="116" width="410" height="48" rx="11" fill="#15909C"/>
+  <text x="590" y="140" font-size="13" class="w h">Cloud Run — service + jobs</text>
+  <text x="590" y="157" font-size="11.5" class="w">request logs · stdout (assist / rerank / ingest)</text>
+  <line x1="775" y1="164" x2="775" y2="190" class="flow" marker-end="url(#arr6)"/>
+
+  <rect x="570" y="192" width="410" height="52" rx="11" class="card"/>
+  <text x="590" y="214" font-size="12.5" class="t h">Cloud Logging sink → BigQuery (automated)</text>
+  <text x="590" y="232" font-size="11.5" class="m">ge-search-app-logs-to-bq · unique writer identity</text>
+  <line x1="775" y1="244" x2="775" y2="270" class="flow" marker-end="url(#arr6)"/>
+
+  <rect x="570" y="272" width="410" height="58" rx="11" fill="#0063C3"/>
+  <text x="590" y="296" font-size="13" class="w h">BigQuery · ge_search_app_logs</text>
+  <text x="590" y="315" font-size="11.5" class="w">date-partitioned tables: ..._requests · ..._stdout</text>
+
+  <!-- converge to SQL -->
+  <line x1="265" y1="330" x2="470" y2="372" class="flow" marker-end="url(#arr6)"/>
+  <line x1="775" y1="330" x2="570" y2="372" class="flow" marker-end="url(#arr6)"/>
+  <rect x="380" y="374" width="280" height="46" rx="11" fill="#92BE43"/>
+  <text x="520" y="398" font-size="13" text-anchor="middle" class="w h">sql/analytics.sql</text>
+  <text x="520" y="414" font-size="11" text-anchor="middle" class="w">ready-to-run cost &amp; ops queries</text>
+
+  <!-- footer: what each is for -->
+  <rect x="40" y="440" width="465" height="98" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="464" font-size="13" class="t h">Verify the cost model</text>
+  <text x="60" y="486" font-size="12" class="m">• Standalone search (93D6-7280-CF05) should be ~$0 —</text>
+  <text x="72" y="503" font-size="12" class="m">all search rides the GE subscription</text>
+  <text x="60" y="522" font-size="12" class="m">• Reranker = "Vertex AI Search: Ranking" (EE89-3EE8-2541),</text>
+  <text x="72" y="539" font-size="12" class="m">$1/1,000, only when --rerank is on</text>
+
+  <rect x="535" y="440" width="465" height="98" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="555" y="464" font-size="13" class="t h">Troubleshoot with SQL</text>
+  <text x="555" y="486" font-size="12" class="m">• Request latency &amp; errors; assist / rerank events</text>
+  <text x="555" y="503" font-size="12" class="m">• Ingest &amp; reconcile runs</text>
+  <text x="555" y="522" font-size="12" class="m">• Joinable with the app's own ge_search_logs tables</text>
+</svg>

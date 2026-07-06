@@ -31,8 +31,8 @@
     <rect x="692" y="118" width="308" height="86" rx="12" fill="#0063C3"/>
     <text x="712" y="144" class="w h">Per-document Q&amp;A</text>
     <text x="712" y="165" class="w">POST /api/doc/qa</text>
-    <text x="712" y="184" class="w">question or summary grounded</text>
-    <text x="712" y="199" class="w">on ONE document</text>
+    <text x="712" y="184" class="w">question or summary, ACL-scoped,</text>
+    <text x="712" y="199" class="w">steered to the doc by title</text>
   </g>
 
   <!-- arrows into shared pipeline -->
@@ -45,41 +45,41 @@
   <text x="60" y="272" font-size="13" class="t h">Shared, ACL-safe generation path (re-derived server-side — never trusts client-sent docs)</text>
   <g font-size="12.5">
     <rect x="60" y="288" width="250" height="58" rx="10" fill="#ffffff" stroke="#E5EAF1" stroke-width="1.5"/>
-    <text x="78" y="312" class="t h">ACL-trimmed documents</text>
-    <text x="78" y="331" class="m">acl_groups ∩ user groups</text>
+    <text x="78" y="312" class="t h">ACL filter (enforced)</text>
+    <text x="78" y="331" class="m">acl_groups: ANY(user groups)</text>
     <line x1="310" y1="317" x2="344" y2="317" class="flow" marker-end="url(#arr4)"/>
     <rect x="346" y="288" width="300" height="58" rx="10" fill="#0056B3"/>
-    <text x="364" y="312" class="w h">Gemini (grounded)</text>
-    <text x="364" y="331" class="w">cites sources · omits, never invents</text>
+    <text x="364" y="312" class="w h">GE engine assistant (:streamAssist)</text>
+    <text x="364" y="331" class="w">retrieval + grounded answer · cites sources</text>
     <line x1="646" y1="317" x2="680" y2="317" class="flow" marker-end="url(#arr4)"/>
     <rect x="682" y="288" width="298" height="58" rx="10" fill="#ffffff" stroke="#E5EAF1" stroke-width="1.5"/>
     <text x="700" y="312" class="t h">Answer + citations</text>
-    <text x="700" y="331" class="m">Markdown · copyable · logged</text>
+    <text x="700" y="331" class="m">SSE assembled server-side · logged</text>
   </g>
 
-  <!-- option chips -->
-  <text x="40" y="398" font-size="13" class="t h">Per-request options</text>
+  <!-- design-notes chips -->
+  <text x="40" y="398" font-size="13" class="t h">Why it's covered &amp; ACL-safe (verified on a live GE engine)</text>
   <g font-size="12">
     <rect x="40" y="410" width="232" height="50" rx="10" class="card"/>
-    <text x="58" y="431" class="t h">Model picker</text>
-    <text x="58" y="449" class="m">Flash (default) → Pro on overflow</text>
+    <text x="58" y="431" class="t h">Subscription-covered</text>
+    <text x="58" y="449" class="m">GE engine assistant — no per-token bill</text>
 
     <rect x="284" y="410" width="210" height="50" rx="10" class="card"/>
-    <text x="302" y="431" class="t h">High thinking</text>
-    <text x="302" y="449" class="m">on Q&amp;A for better answers</text>
+    <text x="302" y="431" class="t h">Same predicate as search</text>
+    <text x="302" y="449" class="m">acl_groups filter, server-enforced</text>
 
     <rect x="506" y="410" width="232" height="50" rx="10" class="card"/>
-    <text x="524" y="431" class="t h">Google Search (opt-in)</text>
-    <text x="524" y="449" class="m">adds public web context</text>
+    <text x="524" y="431" class="t h">No id filters</text>
+    <text x="524" y="449" class="m">'id' isn't filterable on a GE engine</text>
 
     <rect x="750" y="410" width="250" height="50" rx="10" class="card"/>
-    <text x="768" y="431" class="t h">Multimodal</text>
-    <text x="768" y="449" class="m">Gemini reads the docs' PDF pages</text>
+    <text x="768" y="431" class="t h">Questions, not keywords</text>
+    <text x="768" y="449" class="m">keyword queries wrapped in a summarize ask</text>
   </g>
 
   <!-- footer -->
   <rect x="40" y="478" width="960" height="74" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
   <text x="60" y="502" font-size="13" class="t h">Why opt-in</text>
   <text x="60" y="522" font-size="12.5" class="m">• Default OFF keeps search fast and cheap; a header toggle + on-demand button generate the answer only when asked.</text>
-  <text x="60" y="541" font-size="12.5" class="m">• Every AI turn is logged to BigQuery ai_turns (model used, web-search flag, latency, search_id) — joinable back to the search.</text>
+  <text x="60" y="541" font-size="12.5" class="m">• Every AI turn is logged to BigQuery ai_turns (latency, citations, search_id) — joinable back to the originating search.</text>
 </svg>

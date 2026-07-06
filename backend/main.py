@@ -18,7 +18,7 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -26,7 +26,6 @@ import bqlog
 import config
 import discovery
 import gcsdoc
-import generate
 import identity
 import permissions
 
@@ -66,14 +65,20 @@ def get_config():
         "identitySource": config.IDENTITY_SOURCE,
         "personas": permissions.personas(),       # drives the demo persona switcher
         "facetFields": discovery.FACET_FIELDS,     # which data filters the UI may offer
-        "models": config.answer_models(),          # LLMs the UI may pick for the AI answer
+        "autocomplete": config.AUTOCOMPLETE,       # enables search-as-you-type suggestions
     }
 
 
-def _model(body):
-    """Validate a client-requested model against the server allowlist; None → default."""
-    m = (body.get("model") or "").strip()
-    return m if m in config.ANSWER_MODEL_IDS else None
+@app.get("/api/complete")
+def complete(request: Request):
+    """Search-as-you-type suggestions (GE completionConfig). Suggestions are query hints,
+    not documents — the search they trigger is still ACL-filtered server-side."""
+    if not config.AUTOCOMPLETE:
+        return {"suggestions": []}
+    q = (request.query_params.get("q") or "").strip()
+    if len(q) < 2:  # don't round-trip on 1 char
+        return {"suggestions": []}
+    return {"suggestions": discovery.complete(q, user_pseudo_id=_user(request))}
 
 
 def _parse_query(body):
@@ -84,16 +89,21 @@ def _parse_query(body):
 
 
 def _retrieve_trim(query, page_size, selected, user):
-    """Shared retrieval + security trim for /api/search and /api/answer.
+    """Shared retrieval + security trim for /api/search and the AI endpoints.
 
     Returns (groups, available_facets, allowed_docs). The ACL trim and faceting run
     SERVER-SIDE in VAIS via the indexed acl_groups field (scales to any corpus size;
     facets cascade exactly). As defense-in-depth we re-verify the returned page against
     the LIVE Firestore graph — so a doc whose acl_groups drifted out of date is still
     dropped (O(page_size), one Firestore 'in' query).
+
+    Always cascade=False: the own-excluded recompute for active filter fields costs an
+    extra engine query per field, the AI endpoints ignore facets entirely, and
+    /api/search returns immediately while the UI patches chip counts via /api/facets.
     """
     groups = permissions.groups_for_user(user)
-    allowed, available = discovery.search_faceted(query, page_size, sorted(groups), selected)
+    allowed, available = discovery.search_faceted(query, page_size, sorted(groups),
+                                                  selected, cascade=False)
     allowed = permissions.trim(allowed, groups)
     return groups, available, allowed
 
@@ -103,11 +113,24 @@ def _citations(docs):
              "snippet": d.get("snippet")} for i, d in enumerate(docs)]
 
 
+def _answer_meta(text, latency_ms):
+    """Provenance shown next to AI answers. The GE assistant does not disclose the
+    underlying model or meter tokens back (usage rides the per-seat subscription, not
+    per-token billing) — the model is the engine default and tokensEstimated is an
+    ESTIMATE from answer length (~4 chars/token), labeled as such in the UI. Never
+    treat it as billing data."""
+    return {
+        "assistant": config.ASSISTANT_ID,
+        "model": "engine default (not disclosed by the GE assistant API)",
+        "tokensEstimated": (len(text) + 3) // 4 if text else 0,
+        "latencyMs": latency_ms,
+    }
+
+
 @app.post("/api/search")
-async def search(request: Request):
+def search(request: Request, body: dict = Body(...)):
     """Fast path: retrieve + ACL-trim + facets. No LLM — the AI answer is opt-in
     (toggle / on-demand button) and served separately by /api/answer."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     if not query:
         return JSONResponse({"error": "empty query"}, status_code=400)
@@ -133,41 +156,70 @@ async def search(request: Request):
     }
 
 
+@app.post("/api/facets")
+def facets(request: Request, body: dict = Body(...)):
+    """Deferred facet cascade for the ACTIVELY-filtered fields (own-filter excluded, so
+    sibling values stay pickable for multi-select). /api/search intentionally skips this
+    recompute to render results immediately; the UI calls here right after and merges the
+    patch into availableFilters (a field mapped to [] means: drop that chip group).
+    Same ACL scope as search — counts never reveal documents the user can't see."""
+    query, _, selected = _parse_query(body)
+    if not query:
+        return JSONResponse({"error": "empty query"}, status_code=400)
+    user = _user(request)
+    groups = permissions.groups_for_user(user)
+    # Fail-soft: the patch is cosmetic (chip counts) — a transient engine failure here
+    # must never surface as a 500; the UI just keeps the own-filtered counts.
+    try:
+        patch = discovery.cascade_facets(query, sorted(groups), selected)
+    except Exception as e:
+        print("facets patch skipped: %s: %s" % (type(e).__name__, str(e)[:160]), flush=True)
+        patch = {}
+    return {"availableFilters": patch}
+
+
 @app.post("/api/answer")
-async def answer(request: Request):
+def answer(request: Request, body: dict = Body(...)):
     """On-demand AI answer over the SAME ACL-trimmed set as /api/search (re-derived
     server-side so the trim is authoritative — never trusts client-sent docs)."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     if not query:
         return JSONResponse({"error": "empty query"}, status_code=400)
 
     user = _user(request)
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
-    requested, use_search = _model(body), bool(body.get("useSearch"))
     t0 = time.monotonic()
 
-    if config.ANSWER_MODE == "de_filter":
-        summary, _ = discovery.answer_with_filter(query, [d["documentId"] for d in allowed])
-        used_model = "vais-summary"
-    else:
-        res = generate.answer(query, allowed, model=requested,
-                              thinking=config.ANSWER_THINKING or None, use_search=use_search)
-        summary, used_model, use_search = res["text"], res["model"], res["search"]
+    # Grounded answer via the GE engine assistant (:streamAssist), scoped to the user's ACL
+    # groups + active facet filters (the same enforced predicate as search — `id` is not
+    # filterable on a GE engine, so the assistant grounds over the user's accessible slice
+    # rather than the exact result page). Covered by the GE subscription and ACL-safe.
+    # Surface its grounded references as citations when present, else fall back to the
+    # trimmed result set.
+    allowed_ids = [d["documentId"] for d in allowed]
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
+    # Search queries are usually keywords, which the assistant declines as
+    # NON_ASSIST_SEEKING_QUERY_IGNORED — wrap them in an explicit summarization ask.
+    summary_q = "Summarize, with specifics, what the accessible documents say about: %s" % query
+    # A new result-set answer starts a fresh assistant conversation; the returned session
+    # is handed to the client so its "Ask about these documents" follow-ups keep context.
+    summary, refs, session = discovery.assist(summary_q, allowed_ids, acl_filter)
+    citations = _citations(refs) if refs else _citations(allowed)
+    latency_ms = int((time.monotonic() - t0) * 1000)
 
     bqlog.log_ai_turn(user, groups, "answer", search_id=(body.get("searchId") or ""),
-                      query=query, model_requested=requested or "", model_used=used_model,
-                      used_search=use_search, result_count=len(allowed),
-                      latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "summary": summary, "citations": _citations(allowed)}
+                      query=query, model_requested="", model_used="ge-assist",
+                      used_search=False, result_count=len(allowed),
+                      latency_ms=latency_ms)
+    return {"user": user, "summary": summary, "citations": citations,
+            "sessionId": session, "meta": _answer_meta(summary, latency_ms)}
 
 
 @app.post("/api/ask")
-async def ask(request: Request):
+def ask(request: Request, body: dict = Body(...)):
     """Free-form Q&A over the CURRENT result set: same ACL-trimmed docs as /api/search
     (re-derived server-side), answering the user's follow-up `question` rather than
     summarizing. Powers the 'Ask about these documents' box on the answer card."""
-    body = await request.json()
     query, page_size, selected = _parse_query(body)
     question = (body.get("question") or "").strip()
     if not query or not question:
@@ -175,18 +227,25 @@ async def ask(request: Request):
 
     user = _user(request)
     groups, _, allowed = _retrieve_trim(query, page_size, selected, user)
-    requested = _model(body)
     t0 = time.monotonic()
-    # Q&A over the result set: high thinking for better answers + optional web grounding
-    res = generate.answer(question, allowed, model=requested, thinking=config.ASK_THINKING,
-                          use_search=bool(body.get("useSearch")))
+    # Follow-up Q&A grounded via the GE engine assistant, scoped to the user's ACL groups
+    # + active facet filters (same enforced predicate as the search trim).
+    allowed_ids = [d["documentId"] for d in allowed]
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups), **selected})
+    # Continue the answer-card conversation when the client passes its sessionId, so
+    # follow-ups like "show a trend from these docs" resolve against the prior turns.
+    answer_text, refs, session = discovery.assist(question, allowed_ids, acl_filter,
+                                                  session=(body.get("sessionId") or None))
+    citations = _citations(refs) if refs else _citations(allowed)
+    latency_ms = int((time.monotonic() - t0) * 1000)
     discovery.write_user_event("search", query=question,
-                               document_ids=[d["documentId"] for d in allowed], user_id=user)
+                               document_ids=allowed_ids, user_id=user)
     bqlog.log_ai_turn(user, groups, "ask", search_id=(body.get("searchId") or ""),
-                      query=query, question=question, model_requested=requested or "",
-                      model_used=res["model"], used_search=res["search"],
-                      result_count=len(allowed), latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"user": user, "answer": res["text"], "citations": _citations(allowed)}
+                      query=query, question=question, model_requested="",
+                      model_used="ge-assist", used_search=False,
+                      result_count=len(allowed), latency_ms=latency_ms)
+    return {"user": user, "answer": answer_text, "citations": citations,
+            "sessionId": session, "meta": _answer_meta(answer_text, latency_ms)}
 
 
 def _doc_page(title, message, status):
@@ -209,10 +268,9 @@ def _doc_page(title, message, status):
 
 
 @app.post("/api/doc/qa")
-async def doc_qa(request: Request):
+def doc_qa(request: Request, body: dict = Body(...)):
     """Ask a question (or 'summarize') about ONE specific document. ACL-checked, and
     grounded only on that document (multimodal PDF read, or its extracted text)."""
-    body = await request.json()
     document_id = (body.get("documentId") or "").strip()
     question = (body.get("question") or "").strip()
     if not document_id or not question:
@@ -227,24 +285,38 @@ async def doc_qa(request: Request):
     if not meta:
         return JSONResponse({"error": "document not found"}, status_code=404)
 
-    gcs = meta.get("gcsUri") or ""
-    # PDFs are read via multimodal attach; everything else is grounded on extracted text.
-    use_pdf = config.MULTIMODAL_ANSWERS and gcs.lower().endswith(".pdf")
-    context = "" if use_pdf else gcsdoc.read_text(gcs)
-    requested = _model(body)
     t0 = time.monotonic()
-    res = generate.answer_about_doc(question, meta.get("title") or document_id, gcs, context,
-                                    model=requested, thinking=config.ASK_THINKING,
-                                    use_search=bool(body.get("useSearch")))
+    acl_filter = discovery.build_filter({"acl_groups": sorted(groups)})
+    title = meta.get("title") or document_id
+    sess_in = body.get("sessionId") or None
+    # Answer from the document we ALREADY have: fetch this doc's passages via the hardened
+    # search (pinned by its unique source_url, ACL-filtered) and hand them to the assistant
+    # as context. This decouples doc-QA from the assistant's flap-fragile internal retrieval
+    # — it no longer has to re-find the doc by title, it just reads the excerpts we pass.
+    content = discovery.doc_content(meta.get("sourceUrl"), title, acl_filter)
+    if content:
+        doc_q = ('Using ONLY the following excerpts from the document titled "%s", answer the '
+                 "question. If the excerpts don't contain the answer, say so.\n\n"
+                 "Excerpts:\n%s\n\nQuestion: %s" % (title, content, question))
+        # grounding is the provided excerpts (not the assistant's own search) -> keep the answer
+        answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
+                                                   session=sess_in, require_grounding=False)
+    else:
+        # no retrievable content (rare) -> fall back to steering the assistant by title
+        doc_q = 'Using the document titled "%s", answer: %s' % (title, question)
+        answer_text, _, session = discovery.assist(doc_q, [document_id], acl_filter,
+                                                   session=sess_in)
+    latency_ms = int((time.monotonic() - t0) * 1000)
 
     discovery.write_user_event("view-item", query=question,
                                document_ids=[document_id], user_id=user)
     bqlog.log_ai_turn(user, groups, "doc_qa", search_id=(body.get("searchId") or ""),
                       question=question, document_id=document_id,
-                      model_requested=requested or "", model_used=res["model"],
-                      used_search=res["search"], result_count=1,
-                      latency_ms=int((time.monotonic() - t0) * 1000))
-    return {"documentId": document_id, "title": meta.get("title"), "answer": res["text"]}
+                      model_requested="", model_used="ge-assist",
+                      used_search=False, result_count=1,
+                      latency_ms=latency_ms)
+    return {"documentId": document_id, "title": meta.get("title"), "answer": answer_text,
+            "sessionId": session, "meta": _answer_meta(answer_text, latency_ms)}
 
 
 @app.get("/api/doc/{document_id}")
@@ -273,8 +345,7 @@ def doc(document_id: str, request: Request):
 
 
 @app.post("/api/feedback")
-async def feedback(request: Request):
-    body = await request.json()
+def feedback(request: Request, body: dict = Body(...)):
     user = _user(request)
     doc_id = body.get("documentId", "")
     bqlog.log_feedback(user, body.get("query", ""), doc_id, body.get("title", ""),

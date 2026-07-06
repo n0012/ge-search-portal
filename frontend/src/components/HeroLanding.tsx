@@ -4,6 +4,7 @@ import { Wordmark } from "./Logo";
 import { HexEmblem } from "./HexEmblem";
 import { SideDock } from "./SideDock";
 import { PersonaSwitcher } from "./PersonaSwitcher";
+import { useSuggestions } from "../useSuggestions";
 import type { Persona } from "../types";
 
 const SUGGESTIONS = [
@@ -29,6 +30,7 @@ export function HeroLanding({
   onHow?: () => void;
 }) {
   const [q, setQ] = useState("");
+  const { suggestions, onQueryChange } = useSuggestions(current?.email);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (q.trim()) onSearch(q.trim());
@@ -45,10 +47,6 @@ export function HeroLanding({
       {/* top bar */}
       <header className="relative z-10 flex items-center justify-between px-6 py-5">
         <Wordmark onLight onHome={onHome} />
-        <div className="hidden items-center gap-2 rounded-full bg-amgen-green/15 px-3 py-1 text-xs font-medium text-amgen-teal md:flex">
-          The more you use it, the smarter it becomes
-          <span className="font-bold text-amgen-green">(Roadmap)</span>
-        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={onHow}
@@ -78,10 +76,15 @@ export function HeroLanding({
             <input
               autoFocus
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => { setQ(e.target.value); onQueryChange(e.target.value); }}
               placeholder="Search across Amgen, Alphabet & research…"
+              list="ge-suggest-hero"
+              autoComplete="off"
               className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-amgen-muted"
             />
+            <datalist id="ge-suggest-hero">
+              {suggestions.map((s) => <option key={s} value={s} />)}
+            </datalist>
             <button
               type="submit"
               className="rounded-full bg-amgen-blue px-4 py-1.5 text-sm font-semibold text-white hover:bg-amgen-blueDark"

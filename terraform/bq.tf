@@ -13,7 +13,7 @@ resource "google_bigquery_table" "searches" {
   deletion_protection = false
   schema = jsonencode([
     { name = "event_time", type = "TIMESTAMP", mode = "REQUIRED" },
-    { name = "search_id", type = "STRING" },        # correlation id (join to ai_turns/feedback)
+    { name = "search_id", type = "STRING" }, # correlation id (join to ai_turns/feedback)
     { name = "user", type = "STRING" },
     { name = "query", type = "STRING" },
     { name = "groups", type = "STRING", mode = "REPEATED" },
@@ -49,16 +49,16 @@ resource "google_bigquery_table" "ai_turns" {
   deletion_protection = false
   schema = jsonencode([
     { name = "event_time", type = "TIMESTAMP", mode = "REQUIRED" },
-    { name = "search_id", type = "STRING" },         # join back to searches/feedback
+    { name = "search_id", type = "STRING" }, # join back to searches/feedback
     { name = "user", type = "STRING" },
     { name = "groups", type = "STRING", mode = "REPEATED" },
-    { name = "feature", type = "STRING" },          # answer | ask | doc_qa
+    { name = "feature", type = "STRING" }, # answer | ask | doc_qa
     { name = "query", type = "STRING" },
     { name = "question", type = "STRING" },
-    { name = "document_id", type = "STRING" },       # doc_qa only
-    { name = "model_requested", type = "STRING" },   # what the UI picked ("" = default)
-    { name = "model_used", type = "STRING" },        # what actually ran (after failover)
-    { name = "used_search", type = "BOOL" },         # Google Search grounding on?
+    { name = "document_id", type = "STRING" },     # doc_qa only
+    { name = "model_requested", type = "STRING" }, # what the UI picked ("" = default)
+    { name = "model_used", type = "STRING" },      # what actually ran (after failover)
+    { name = "used_search", type = "BOOL" },       # Google Search grounding on?
     { name = "result_count", type = "INTEGER" },
     { name = "latency_ms", type = "INTEGER" },
   ])
@@ -71,7 +71,7 @@ resource "google_bigquery_table" "feedback" {
   deletion_protection = false
   schema = jsonencode([
     { name = "event_time", type = "TIMESTAMP", mode = "REQUIRED" },
-    { name = "search_id", type = "STRING" },         # join back to searches/ai_turns
+    { name = "search_id", type = "STRING" }, # join back to searches/ai_turns
     { name = "user", type = "STRING" },
     { name = "query", type = "STRING" },
     { name = "document_id", type = "STRING" },

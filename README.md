@@ -17,7 +17,7 @@ full design rationale · [`INGEST.md`](./INGEST.md) — initial-load + **increme
 
 ## Features
 - 🔍 **VAIS retrieval** over a data store's serving config (no separate GE *app* needed),
-  with query expansion, spell correction, and recency **boosting** — then a **semantic
+  with query expansion and spell correction (recency boosting available but off by default) — then an optional **semantic
   re-rank** (Discovery Engine **Ranking API**) over the ACL-trimmed set *before* results
   and the AI answer, so the best docs lead.
 - 🔒 **Security trimming, server-side & scalable** — each doc's authorized groups are indexed
@@ -26,14 +26,19 @@ full design rationale · [`INGEST.md`](./INGEST.md) — initial-load + **increme
   live Firestore re-check of the returned page is the defense-in-depth net.
 - 🎚️ **Dynamic, cascading data filters** — facet chips (company, source, type, year, …)
   computed server-side; selecting one narrows the others (exclude-own-field multi-select).
-- 🧠 **Opt-in AI answer** — search is LLM-free/fast by default; a header toggle + on-demand
-  button generate a grounded, cited answer (`/api/answer`), optionally **multimodal**
-  (Gemini reads the retrieved PDFs). Plus **"Ask about these documents"** follow-up Q&A over
-  the whole result set (`/api/ask`) and **per-document Q&A / summarize** (`/api/doc/qa`).
-- 🎛️ **Pick the model** — a header dropdown chooses the LLM from a **server allowlist**
-  (Flash default; Pro for deeper reasoning). Flash is default; on context **overflow** it
-  **fails over** to the larger pro model automatically. Q&A paths run with **high thinking**;
-  each Ask box has an opt-in **Google Search** grounding toggle (adds public web context).
+- 🧠 **Opt-in AI answer — Gemini Enterprise engine, subscription-covered** — search is
+  LLM-free/fast by default; a header toggle + on-demand button generate a grounded, cited
+  answer (`/api/answer`). Every answer is produced by the **Gemini Enterprise engine assistant**
+  (`:streamAssist` — query understanding, retrieval, grounded generation, inline citations),
+  scoped by the user's indexed `acl_groups` (+ facet) predicate so the ACL trim holds
+  (`id` is **not** a filterable field on a GE engine — see *Identity & access*). The same path powers
+  **per-document Q&A / summarize** (`/api/doc/qa`) and **"Ask about these documents"** follow-up
+  Q&A over the result set (`/api/ask`).
+- 💳 **All traffic billed through the GE subscription** — both `:search` and the assistant
+  (`:streamAssist`) are called on the **GE engine's** serving config, so queries draw on the
+  pooled per-seat Gemini Enterprise subscription instead of standalone Vertex AI Search charges
+  (SKU `93D6-7280-CF05`). Querying the data store directly would bill standalone — so the app
+  never does.
 - 📄 **Signed-URL access to the imported copy** (`/api/doc/{id}`) — ACL-checked, alongside
   the original web link.
 - 🔁 **Initial + incremental ingestion** — a Firestore `catalog` collection is the on-ramp;
@@ -56,7 +61,7 @@ Browser ─IAP─▶ React SPA ─/api─▶ FastAPI (app SA, read-only)        
                   │     ──────────────────────────────────▶ Vertex AI Search (server-side trim)│
                   │  3b. semantic re-rank the trimmed set ──▶ Ranking API (before results + AI) │
                   │  4. live re-verify the page vs Firestore (defense-in-depth)                 │
-                  │  5. /api/answer (opt-in): Gemini over trimmed docs; /api/doc/qa per-doc     │
+                  │  5. /api/answer (opt-in): GE assistant (:streamAssist), acl_groups-scoped   │
                   │  6. /api/doc/{id}: ACL-checked signed URL to the imported GCS copy          │
                   │  7. log search/feedback ───────────────▶ BigQuery ge_search_logs.*          │
                   └────────────────────────────────────────────────────────────────────────────┘
@@ -80,10 +85,13 @@ in-app under **"How it works"**):
 | Diagram | What it shows |
 |---|---|
 | [`arch-search.svg`](./frontend/public/diagrams/arch-search.svg) | Core search — ACL-safe, query-time flow |
-| [`arch-ai.svg`](./frontend/public/diagrams/arch-ai.svg) | AI summarization & document Q&A — opt-in, grounded, ACL-safe |
+| [`arch-ai.svg`](./frontend/public/diagrams/arch-ai.svg) | AI answers — GE engine assistant (:streamAssist), opt-in, grounded, ACL-safe, subscription-covered |
+| [`arch-billing.svg`](./frontend/public/diagrams/arch-billing.svg) | Licensing & billing — how the per-seat GE subscription covers search + Q&A (and what would bill extra) |
+| [`arch-pricing.svg`](./frontend/public/diagrams/arch-pricing.svg) | Pricing model — what a per-user/month seat includes vs. what bills separately (reranker, hosting) |
 | [`arch-ingest.svg`](./frontend/public/diagrams/arch-ingest.svg) | Catalog & document-processing pipeline (layout parser → chunking → index; initial + incremental) |
 | [`arch-aws-sync.svg`](./frontend/public/diagrams/arch-aws-sync.svg) | Syncing with AWS DynamoDB via the Firestore catalog contract |
 | [`arch-logging.svg`](./frontend/public/diagrams/arch-logging.svg) | Logging, analytics & feedback (BigQuery + learn-to-rank loop) |
+| [`arch-exports.svg`](./frontend/public/diagrams/arch-exports.svg) | Optional BigQuery exports — billing (per-SKU cost) + Cloud Logging (troubleshooting), flag-gated |
 
 ## Security model (the core)
 - **RBAC, dynamic, enforced server-side, not user-controllable.** A user sees a document iff
@@ -95,8 +103,15 @@ in-app under **"How it works"**):
   immediately with no re-index. `backend/main._retrieve_trim` then re-verifies the returned
   page against live Firestore (`permissions.trim`) as defense-in-depth, so a stale
   `acl_groups` can never leak.
-- **Answer is ACL-safe.** `/api/answer` and `/api/doc/qa` generate **only over the
-  ACL-trimmed set** (re-derived server-side), never the raw retrieved set.
+- **Answer is ACL-safe.** `/api/answer`, `/api/ask`, and `/api/doc/qa` re-derive the user's
+  authorization server-side and scope the GE engine assistant (`:streamAssist`) via
+  `toolsSpec.vertexAiSearchSpec.filter` with the **same indexed `acl_groups: ANY(<user groups>)`
+  (+ facet) predicate the search trim uses** — verified enforced (grounding refuses to cross it).
+  Two designs that look right but **don't** work on a GE engine (verified live, July 2026):
+  `id: ANY(<allowed ids>)` — `id` isn't a filterable field (`:search` rejects it; the assistant
+  tool silently returns no grounding) — and `dataStoreSpecs[].filter`, which is only honored on
+  multi-data-store engines (silently **ignored** on a single-store engine — a leak if relied on).
+  `discovery.assist()` therefore fails closed when no ACL filter is supplied.
 - **Data filters only narrow within the permitted set** — facets are computed over the
   ACL-filtered set, so chips never reveal hidden docs; cascading uses exclude-own-field.
 - **Imported-copy access is ACL-checked.** `/api/doc/{id}` verifies the user's groups before
@@ -176,51 +191,37 @@ hand-off zip, and gotchas: **[`DEPLOY.md`](./DEPLOY.md)**. Teardown: `cd terrafo
 |---|---|
 | `GET /healthz` | liveness |
 | `GET /api/me` | resolved user + groups |
-| `GET /api/config` | data store id, personas, facet fields, **models** (answer LLM allowlist) |
-| `POST /api/search` | `{query, facets?}` → `{results[], citations[], availableFilters, …}` — ACL-trimmed, **LLM-free** (fast) |
-| `POST /api/answer` | `{query, facets?, model?}` → `{summary, citations[]}` — opt-in Gemini answer over the same trimmed set |
-| `POST /api/ask` | `{query, facets?, question, model?, useSearch?}` → `{answer, citations[]}` — Q&A over the whole result set (high thinking; optional web search) |
-| `POST /api/doc/qa` | `{documentId, question, model?, useSearch?}` → `{answer}` — Q&A / summarize grounded on ONE doc (ACL-checked) |
+| `GET /api/config` | data store id, identity source, personas, facet fields |
+| `POST /api/search` | `{query, facets?}` → `{results[], citations[], availableFilters, …}` — GE-engine `:search`, ACL-trimmed, **LLM-free** (fast) |
+| `POST /api/answer` | `{query, facets?}` → `{summary, citations[]}` — opt-in answer via the GE engine assistant (`:streamAssist`), ACL+facet-scoped (the keyword query is wrapped in a summarize ask — the assistant skips bare keywords as `NON_ASSIST_SEEKING_QUERY_IGNORED`) |
+| `POST /api/ask` | `{query, facets?, question}` → `{answer, citations[]}` — GE-engine-assistant Q&A, ACL+facet-scoped |
+| `POST /api/doc/qa` | `{documentId, question}` → `{answer}` — GE-engine-assistant Q&A / summarize, ACL-checked + ACL-scoped, steered to the doc by title (`id` isn't filterable, so exact single-doc pinning isn't possible server-side) |
 | `GET /api/doc/{id}` | 302 → short-lived **signed URL** for the imported GCS copy (ACL-checked; friendly HTML on deny/missing) |
 | `POST /api/feedback` | `{documentId, query, vote}` → logs to BigQuery + (up-vote) VAIS user event |
 
 ## Ranking & relevance
-Three complementary layers, in order:
+1. **Native GE-engine ranking** (`:search` on the **GE engine** serving config) — hybrid
+   semantic + keyword retrieval, with `queryExpansion: AUTO` and `spellCorrection: AUTO`. This is
+   the primary ranking and is covered by the GE subscription; it's strong on its own. An **optional**
+   recency `boostSpec` (`BOOST_RECENT_YEARS`, **off by default**) is available for corpora with a
+   wide date range — leave it off unless recency is a genuine tie-breaker, since a blanket year
+   boost on an all-recent corpus perturbs the native relevance order rather than improving it.
+2. **Learn-to-rank autotuning** (over time) — `search` + up-vote `view-item` user events are
+   reported to VAIS (`discovery.write_user_event`), so the native ranking improves with use.
+3. **Optional cross-encoder re-rank — Discovery Engine Ranking API** (`rankingConfigs:rank`,
+   `backend/discovery.py::rerank`). A documented capability that sharpens ordering by scoring each
+   doc against the *full query*. **Off by default (`RERANK=off`)** because it's a **separately
+   billed** Vertex AI Search call (not routed through the GE engine) — turning it on means an extra
+   charge outside the subscription. When on, it overfetches `RERANK_TOP_N` and feeds the
+   cross-encoder VAIS **extractive segments** (`RERANK_EXTRACTIVE`) rather than short snippets.
+   **Enabling it later** is a runtime env flip on the Cloud Run service (no rebuild) — see
+   [DEPLOY.md → "Optional: sharper ranking via the Ranking API"](./DEPLOY.md) for the exact
+   command and the opex trade-off.
 
-1. **Native VAIS ranking** (`:search` on the serving config) — hybrid semantic + keyword
-   retrieval, with `queryExpansion: AUTO`, `spellCorrection: AUTO`, and a recency
-   `boostSpec` (`BOOST_RECENT_YEARS`). This produces the initial candidate set.
-2. **Semantic re-rank — Discovery Engine Ranking API** (`rankingConfigs/default_ranking_config:rank`,
-   `backend/discovery.py::rerank`). `search_faceted` **overfetches `RERANK_TOP_N` (default 50)**,
-   sends `{query, records:[{id,title,content}]}` to the cross-encoder reranker
-   (`RERANK_MODEL`, default `semantic-ranker-default@latest`), reorders by relevance, then
-   shows the top `PAGE_SIZE`. It runs on the **ACL-trimmed** set and **before** the AI
-   summary/answer — so both the displayed results and what Gemini grounds on lead with the
-   most relevant permitted docs. Why here: we ACL-trim after retrieval, so reranking the
-   trimmed set (not the raw corpus) is where it pays off. **Best-effort:** if the model is
-   unavailable or the call errors, it's a silent no-op and native ranking stands. Toggle with
-   `RERANK=off`. Requires `discoveryengine.rankingConfigs.rank` (granted to the app SA's
-   narrow custom role — still no editor).
-3. **Learn-to-rank autotuning** (over time) — `search` + up-vote `view-item` user events are
-   reported to VAIS (`discovery.write_user_event`), so the *native* ranking improves with use.
-
-### What's new here (the Ranking API)
-The stock Gemini Enterprise / Vertex AI Search app serves **native-ranked** results only —
-a single retrieval pass. This portal adds an explicit **two-stage retrieve → re-rank**:
-the [Ranking API](https://docs.cloud.google.com/generative-ai-app-builder/docs/ranking)
-(`projects.locations.rankingConfigs.rank`, model `semantic-ranker-default-004`) is a
-documented Google capability that isn't wired into the out-of-box flow — we call it on the
-**ACL-trimmed** set before results and AI.
-
-**Benefits**
-- **Sharper top results** — a cross-encoder scores each doc against the *full query* (not
-  just embedding similarity), so the most on-point permitted docs lead.
-- **Better AI answers** — `/api/answer` · `/api/ask` ground on the re-ranked top docs, so
-  summaries cite the right sources (garbage-in-garbage-out avoided at the source).
-- **Right place to spend it** — applied *after* the per-user security trim, so it ranks only
-  what the user may see (not the raw corpus), and over a small top-N (cheap, ~tens of ms).
-- **Zero-risk to roll out** — best-effort: unavailable model / error → silent no-op, native
-  ranking stands. Toggle per environment (`RERANK`, `RERANK_MODEL`, `RERANK_TOP_N`).
+**Interpreting the scores.** Relevance scores are in `[0,1]` and are meant for **relative
+ordering**, not as a calibrated `0.5` threshold. Strict ranking reserves high scores for near-exact
+matches, so most genuinely-useful context lands in the lower band (often `0–0.5`) — expected, not a
+defect. Use **rank order**, not an absolute cutoff — calibrate any threshold on your own corpus.
 
 **Docs:** [Ranking API guide](https://docs.cloud.google.com/generative-ai-app-builder/docs/ranking)
 · [`rankingConfigs.rank` REST reference](https://docs.cloud.google.com/generative-ai-app-builder/docs/reference/rest/v1/projects.locations.rankingConfigs/rank)
@@ -229,9 +230,11 @@ documented Google capability that isn't wired into the out-of-box flow — we ca
 ## Document processing, ingestion & scale (see PLAN.md §5.5–5.7)
 - **Layout parser + layout chunking** (`terraform/vais.tf`) → structure + tables + OCR; VAIS
   embeds chunks into a hybrid semantic+keyword index.
-- **Multimodal answers** (`MULTIMODAL_ANSWERS=on`) — Gemini (`gemini-3.5-flash`, 1M ctx)
-  reads the top retrieved docs' PDFs so it can interpret charts/tables/figures. No vector
-  index needed; VS2 / Agent Retrieval is the documented add-on for chart-*only* retrieval.
+- **Grounding is text-based.** The GE engine assistant grounds on the indexed text/extractive
+  segments produced by the layout parser (tables/headings/OCR), not vision over raw PDF page
+  images. (True page-image multimodal would require a **direct** Vertex Gemini call, which bills
+  **separately per token** outside the GE subscription — so it's intentionally not used here, to
+  keep all traffic covered. See [DEPLOY.md](./DEPLOY.md) for the billing rationale.)
 - **Scale-out** — `ingest_task_count` / `ingest_parallelism` (Terraform). The corpus is
   sharded disjointly (`items[i::n]`) across Cloud Run Job tasks; each task imports its own
   `metadata-<task>.jsonl` (INCREMENTAL, idempotent — no barrier).
@@ -263,18 +266,17 @@ through `citation_pdf_url` → NCBI OA pdf/tgz. arXiv works everywhere. Broader 
 
 ## Configuration
 **App env** (`backend/config.py`): `PROJECT_ID`, `PROJECT_NUMBER`, `LOCATION`,
-`DATA_STORE_ID`, `IDENTITY_SOURCE` (iap|demo), `PERMISSION_BACKEND=firestore`,
-`FIRESTORE_DATABASE`, `ANSWER_MODE` (gemini|de_filter), `GEMINI_MODEL` (flash default),
-`GEMINI_PRO_MODEL` (context-overflow failover), `ASK_THINKING` (high|low|budget; Q&A),
-`ANSWER_THINKING` (summary; default off),
-`MULTIMODAL_ANSWERS` (on|off), `MULTIMODAL_MODEL`, `MULTIMODAL_MAX_DOCS`, `SIGNED_URL_MINUTES`,
-`BQ_LOGGING`, `BQ_DATASET`, `PAGE_SIZE`, `OVERFETCH`, `BOOST_RECENT_YEARS`,
-`RERANK` (on|off), `RERANK_MODEL`, `RERANK_TOP_N`.
+`DATA_STORE_ID`, `ENGINE_ID` (the **GE engine** — all `:search`/`:streamAssist` hit its serving
+config so traffic is subscription-covered), `ASSISTANT_ID` (default `default_assistant`),
+`IDENTITY_SOURCE` (iap|demo), `PERMISSION_BACKEND=firestore`, `FIRESTORE_DATABASE`,
+`SIGNED_URL_MINUTES`, `BQ_LOGGING`, `BQ_DATASET`, `PAGE_SIZE`, `OVERFETCH`, `BOOST_RECENT_YEARS`,
+`RERANK` (off by default — separately-billed Ranking API), `RERANK_MODEL`, `RERANK_TOP_N`,
+`RERANK_EXTRACTIVE` (on|off; extractive segments for result display).
 **Ingest/catalog env** (`scripts/`): `CATALOG_SOURCE` (demo|manifest|dynamo|firestore),
 `CATALOG_DELTA`, `GCS_BUCKET`, `EDGAR_FORMS`, `DYNAMO_TABLE` + `DYNAMO_*_ATTR`.
 **Terraform vars** (`terraform/variables.tf`): `project_id`, `region`, `location`,
-`firestore_location`, `bq_location`, `data_store_id`, `bucket_name`, `gemini_model`,
-`multimodal_answers`, `multimodal_model`, `identity_source`, `iap_members`, `ingest_limit`,
+`firestore_location`, `bq_location`, `data_store_id`, `engine_id` (GE engine/app),
+`assistant_id`, `identity_source`, `iap_members`, `ingest_limit`,
 `ingest_task_count`, `ingest_parallelism`, `reconcile_schedule`.
 
 ## Logging & analytics (BigQuery `ge_search_logs`)

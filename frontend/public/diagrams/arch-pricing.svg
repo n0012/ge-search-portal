@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 590" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arr7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.6;fill:none}
+    </style>
+  </defs>
+  <rect width="1040" height="590" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Pricing model — one per-user/month seat covers the app</text>
+  <text x="40" y="70" font-size="13" class="m">Because every query and answer routes through the Gemini Enterprise engine, the app's search + AI ride the subscription — no per-query or per-token charge.</text>
+
+  <!-- the seat -->
+  <rect x="40" y="92" width="960" height="72" rx="12" fill="#0056B3"/>
+  <text x="60" y="120" font-size="15" class="w h">Gemini Enterprise — per user / per month subscription</text>
+  <text x="60" y="141" font-size="11.5" class="w">Monthly or annual · up to 5,000 seats self-serve · Business (≤300 seats, 30-day trial) · Standard / Plus (unlimited, +Code Assist) · Frontline add-on</text>
+  <text x="60" y="157" font-size="11.5" class="w">List prices (Cloud Billing Catalog, annual–monthly): Standard ~$30–35 · Plus ~$50–60 · Frontline ~$12.50–15 /user/mo · Business self-serve · discuss final pricing with Google Cloud sales</text>
+
+  <!-- included -->
+  <text x="40" y="196" font-size="13" class="t h">Included in the seat — no separate per-use charge to you</text>
+  <g font-size="11.5">
+    <rect x="40" y="208" width="228" height="70" rx="10" fill="#EAF3E0" stroke="#92BE43" stroke-width="1.5"/>
+    <text x="58" y="230" class="t h">Enterprise search</text>
+    <text x="58" y="249" class="m">over your ingested data;</text>
+    <text x="58" y="265" class="m">ACL-trimmed, faceted</text>
+
+    <rect x="280" y="208" width="228" height="70" rx="10" fill="#EAF3E0" stroke="#92BE43" stroke-width="1.5"/>
+    <text x="298" y="230" class="t h">AI assistant answers</text>
+    <text x="298" y="249" class="m">grounded generation +</text>
+    <text x="298" y="265" class="m">citations — no per-token bill</text>
+
+    <rect x="520" y="208" width="228" height="70" rx="10" fill="#EAF3E0" stroke="#92BE43" stroke-width="1.5"/>
+    <text x="538" y="230" class="t h">Doc ingestion + index</text>
+    <text x="538" y="249" class="m">into the data store, within</text>
+    <text x="538" y="265" class="m">the edition's storage quota</text>
+
+    <rect x="760" y="208" width="240" height="70" rx="10" fill="#EAF3E0" stroke="#92BE43" stroke-width="1.5"/>
+    <text x="778" y="230" class="t h">Agents · connectors</text>
+    <text x="778" y="249" class="m">+ NotebookLM</text>
+    <text x="778" y="265" class="m">(by edition)</text>
+  </g>
+  <text x="40" y="298" font-size="11.5" class="m">The app queries the GE engine for both <tspan class="t h" font-weight="700">:search</tspan> and the assistant <tspan class="t h" font-weight="700">:streamAssist</tspan> → usage draws on the pooled seat, not metered per action.</text>
+
+  <!-- bills separately -->
+  <text x="40" y="336" font-size="13" class="t h">Bills separately (outside the subscription)</text>
+  <g font-size="11.5">
+    <rect x="40" y="348" width="300" height="86" rx="10" class="card"/>
+    <text x="58" y="370" class="t h">Opt-in Ranking API (--rerank)</text>
+    <text x="58" y="389" class="m">cross-encoder rerank — SKU EE89-3EE8-2541</text>
+    <text x="58" y="405" class="m">"Vertex AI Search: Ranking" $1/1,000 (no free tier).</text>
+    <text x="58" y="421" class="m">Off by default → then nothing here.</text>
+
+    <rect x="352" y="348" width="300" height="86" rx="10" class="card"/>
+    <text x="370" y="370" class="t h">Ordinary GCP hosting</text>
+    <text x="370" y="389" class="m">Cloud Run · GCS · Firestore ·</text>
+    <text x="370" y="405" class="m">BigQuery · Cloud Build — infra, not</text>
+    <text x="370" y="421" class="m">AI. Mostly Always-Free for a demo.</text>
+
+    <rect x="664" y="348" width="336" height="86" rx="10" class="card"/>
+    <text x="682" y="370" class="t h">If NOT on a GE seat (comparison)</text>
+    <text x="682" y="389" class="m">standalone Agent Search consumption:</text>
+    <text x="682" y="405" class="m">10,000 queries/month free, then</text>
+    <text x="682" y="421" class="m">$1.50 / 1,000 queries (Standard).</text>
+  </g>
+
+  <!-- footer -->
+  <rect x="40" y="450" width="960" height="104" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
+  <text x="60" y="474" font-size="13" class="t h">The one-line takeaway</text>
+  <text x="60" y="495" font-size="12" class="m">On a Gemini Enterprise seat, this app's search, grounded answers, and document ingestion are covered by the per-user/month price — the</text>
+  <text x="60" y="511" font-size="12" class="m">only add-ons are the optional reranker and ordinary cloud hosting. Verify the current cost model with the billing SKU export (--billing-export).</text>
+  <text x="60" y="533" font-size="11" class="m">Figures as of July 2026 and subject to change — confirm on cloud.google.com/gemini-enterprise and cloud.google.com/generative-ai-app-builder/pricing;</text>
+  <text x="60" y="548" font-size="11" class="m">Standard / Plus / Frontline per-seat pricing is quoted by Google Cloud sales.</text>
+</svg>

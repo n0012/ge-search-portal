@@ -39,6 +39,73 @@ def derive_company(struct):
     return struct
 
 
+# quarter from a fiscal PERIOD-END month (authoritative, from EDGAR reportDate)
+_Q_BY_END_MONTH = {3: "Q1", 6: "Q2", 9: "Q3", 12: "Q4"}
+# quarter a 10-Q REPORTS, inferred from its FILING month (fallback when no period_end):
+# filed Apr/May -> Q1, Jul/Aug -> Q2, Oct/Nov -> Q3 (Q4 is the annual 10-K)
+_Q_BY_FILING_MONTH = {4: "Q1", 5: "Q1", 7: "Q2", 8: "Q2", 10: "Q3", 11: "Q3"}
+# plain calendar quarter by month (for dated docs that aren't SEC filings)
+_Q_BY_CAL_MONTH = {m: "Q%d" % ((m - 1) // 3 + 1) for m in range(1, 13)}
+_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+_MONTHS = ["", "January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"]
+
+
+def _date_in(struct, *keys):
+    """First YYYY-MM-DD found in the given fields (then the title)."""
+    for k in keys + ("title",):
+        m = _DATE_RE.search(str(struct.get(k, "") or ""))
+        if m:
+            return m.group(0)
+    return ""
+
+
+def derive_period(struct):
+    """Add keyable time metadata so 'Q4 2025'-style queries/filters/ranking work — across
+    BOTH SEC filings and research papers, with one shared vocabulary:
+      year, quarter (Q1-Q4, or FY for annual filings), month, period ("Q2 2025" / "FY2024").
+
+    Filings use the fiscal period: prefers the EDGAR period-of-report end date
+    (`period_end`), else infers from the filing date + form. Research papers use the
+    calendar quarter of their publish_date. The period is appended to synthetic filing
+    titles (searchable + visible); real paper titles are left intact."""
+    form = str(struct.get("doc_type", ""))
+
+    if form in ("10-K", "10-Q", "8-K"):
+        pend = struct.get("period_end") or ""
+        src = pend or _date_in(struct)
+        struct.pop("period_end", None)  # internal-only; never a facet
+        if not src:
+            return struct
+        year, month = src[:4], int(src[5:7])
+        quarter = None
+        if form == "10-K":  # annual → full fiscal year (early-year filing reports prior year)
+            year = pend[:4] if pend else (str(int(year) - 1) if month <= 4 else year)
+            quarter = "FY"
+        elif form == "10-Q":
+            quarter = _Q_BY_END_MONTH.get(month) if pend else _Q_BY_FILING_MONTH.get(month)
+        elif form == "8-K" and month in (1, 2):  # Jan/Feb earnings report prior-year Q4
+            year, quarter = str(int(year) - 1), "Q4"
+        struct["year"] = year
+        if quarter:
+            struct["quarter"] = quarter
+            period = "FY%s" % year if quarter == "FY" else "%s FY%s" % (quarter, year)
+            struct["period"] = period
+            if period not in (struct.get("title") or ""):
+                struct["title"] = "%s · %s" % (struct.get("title", "").strip(), period)
+        return struct
+
+    # Non-filing dated docs (research papers): calendar quarter/month/year from publish_date
+    src = _date_in(struct, "publish_date")
+    if src:
+        year, month = src[:4], int(src[5:7])
+        struct.setdefault("year", year)
+        struct["quarter"] = _Q_BY_CAL_MONTH.get(month)
+        struct["month"] = _MONTHS[month]
+        struct["period"] = "%s %s" % (struct["quarter"], year)
+    return struct
+
+
 def load_acl_rules():
     """by_department + overrides from seed/acl_rules.yaml (same source 04_seed_acls.py
     uses), so the indexed acl_groups matches the Firestore graph. Best-effort: falls back
@@ -115,6 +182,7 @@ def main():
             seen.add(doc_id)
             struct = {k: v for k, v in row.items() if k not in NON_FACET and v not in (None, "")}
             struct = derive_company(struct)
+            struct = derive_period(struct)  # year/quarter/period for filings + papers
             acl = acl_groups_for(row, doc_id)
             if acl:
                 struct["acl_groups"] = acl

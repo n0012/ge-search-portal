@@ -42,17 +42,27 @@ _creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-p
 SESS = AuthorizedSession(_creds)
 HDR = {"X-Goog-User-Project": PROJECT}
 
-# filter-only string field (VAIS jsonSchema represents repeated values as plain
-# "string"; config keywords sit directly on the property). indexable => filterable;
-# not searchable (no text-relevance impact), not retrievable (don't echo ACLs back),
-# not facetable (it's a security key, not a user-facing facet).
-ACL_FIELD = {
-    "type": "string",
+# filter-only keyword set: indexable => filterable; not searchable (no text-relevance
+# impact), not retrievable (don't echo ACLs back), not facetable (it's a security key,
+# not a user-facing facet).
+ACL_KEYWORDS = {
     "indexable": True,
     "searchable": False,
     "retrievable": False,
     "dynamicFacetable": False,
 }
+
+
+def acl_decl(existing):
+    """The declaration for acl_groups, matching the field's shape in the live schema.
+    If auto-detection already saw documents, the field is {"type": "array", "items":
+    {...}} with the config keywords on `items` — the type can't be altered, so keep the
+    array and set the keywords there. On a still-empty schema declare a plain string
+    with the keywords inline (repeated values still match ANY() filters)."""
+    if (existing or {}).get("type") == "array":
+        items = dict(existing.get("items") or {"type": "string"}, **ACL_KEYWORDS)
+        return {"type": "array", "items": items}
+    return dict({"type": "string"}, **ACL_KEYWORDS)
 
 
 def main():
@@ -66,11 +76,12 @@ def main():
     schema.setdefault("type", "object")
     props = schema.setdefault("properties", {})
 
-    if props.get("acl_groups") == ACL_FIELD:
+    want = acl_decl(props.get("acl_groups"))
+    if props.get("acl_groups") == want:
         print("acl_groups already declared — nothing to do.")
         return
 
-    props["acl_groups"] = ACL_FIELD
+    props["acl_groups"] = want
     body = {"name": SCHEMA, "jsonSchema": json.dumps(schema)}
     p = SESS.patch(f"https://{HOST}/v1/{SCHEMA}", headers=HDR, json=body, timeout=60)
     if p.status_code != 200:

@@ -144,9 +144,18 @@ lookups. (No SQLite. A real **Mongo/DocumentDB adapter** is a documented future 
 2. **user → groups** via `group_users` (cache per request).
 3. **Retrieve-only** `:search`, `summarySpec` **disabled**, **over-fetch** (≈5× display) to survive trimming.
 4. **Trim:** one **batched** `document_groups` lookup for all returned `document_id`s; keep docs whose groups intersect the user's.
-5. **Generate ACL-safe answer** over only the authorized docs:
-   - **(5a, all-in-DE)** re-issue `:search` with `summarySpec` enabled + `filter: 'id: ANY("d1",…)'`. No second LLM; needs id/an ACL field filterable.
-   - **(5b, fallback)** direct **Vertex Gemini** call (e.g. `gemini-2.5-flash`) over the trimmed snippets/extractive segments → answer + citations. No filterable-field requirement; one extra hop; streams cleanly.
+5. **Generate ACL-safe answer** via the **Gemini Enterprise engine assistant** —
+   `engines/{ENGINE_ID}/assistants/{ASSISTANT_ID}:streamAssist` with
+   `toolsSpec.vertexAiSearchSpec.filter: 'acl_groups: ANY(<user groups>)'` (+ active facets).
+   Managed query understanding + retrieval + grounded generation + citations, server-side; the
+   acl_groups predicate — the same one the search trim uses — keeps the ACL trim. (The original
+   design used `id: ANY(<allowed ids>)`, but live verification showed `id` is not filterable on
+   a GE engine: `:search` rejects it and the assistant tool silently fails to ground.)
+   The SSE stream is consumed and assembled server-side into `{summary, citations}`.
+   **Billing:** because the call hits the **GE engine** (not the data store / a non-GE engine),
+   it's covered by the per-seat GE subscription — the same reason `:search` (step 3) targets the
+   GE engine's serving config. Direct Vertex Gemini calls (vision over PDF pages) and the
+   standalone Ranking API are avoided because they bill separately, outside the subscription.
 6. **Return** trimmed `results[]` + ACL-safe `summary`/`citations[]`.
 
 **Variant — filter injection (index-baked labels).** If group labels are baked into doc
@@ -450,7 +459,7 @@ ge-search-portal/
 │   ├── discovery.py           # DE retrieve() + acl_safe_answer() (filter re-query path)
 │   ├── permissions.py         # PermissionStore (documents/document_groups/group_users) + Firestore; trim()
 │   ├── identity.py            # resolve user from IAP header / X-Demo-User
-│   └── generate.py            # (5b) Vertex Gemini answer over trimmed snippets
+│   # (answers come from the GE engine assistant :streamAssist — see discovery.assist)
 └── frontend/
     ├── package.json vite.config.ts tailwind.config.js tsconfig.json index.html
     └── src/
@@ -487,8 +496,8 @@ GCS_BUCKET=gs://...-ge-search-corpus
 PERMISSION_BACKEND=firestore # firestore (DocumentDB adapter = future)
 FIRESTORE_DATABASE=(default)
 IDENTITY_SOURCE=demo         # demo (X-Demo-User) | iap (X-Goog-Authenticated-User-Email)
-ANSWER_MODE=gemini           # gemini (5b, streams) | de_filter (5a)
-GEMINI_MODEL=gemini-2.5-flash
+ENGINE_ID=ge-search-app      # GE engine; all :search + :streamAssist hit it (subscription-covered)
+ASSISTANT_ID=default_assistant
 # no Entra/MSAL/WIF/OAuth secrets — removed (Approach 2 only)
 ```
 
@@ -498,12 +507,12 @@ GEMINI_MODEL=gemini-2.5-flash
 RUNTIME_SA=ge-search-portal@$PROJECT_ID.iam.gserviceaccount.com
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$RUNTIME_SA" --role="roles/discoveryengine.viewer"
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$RUNTIME_SA" --role="roles/datastore.user"
-gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$RUNTIME_SA" --role="roles/aiplatform.user"  # if ANSWER_MODE=gemini
+# plus discoveryengine.assistants.assist (custom role) to call the GE engine assistant
 
 gcloud run deploy ge-search-portal --source . --region $REGION --service-account $RUNTIME_SA \
   --allow-unauthenticated --port 8080 --memory 1Gi \
   --set-env-vars PROJECT_ID=...,PROJECT_NUMBER=...,LOCATION=global,DATA_STORE_ID=ge-search-demo,\
-PERMISSION_BACKEND=firestore,IDENTITY_SOURCE=iap,ANSWER_MODE=gemini
+ENGINE_ID=ge-search-app,ASSISTANT_ID=default_assistant,PERMISSION_BACKEND=firestore,IDENTITY_SOURCE=iap
 ```
 For real per-user identity, front with **IAP** (drop `--allow-unauthenticated`) so
 `X-Goog-Authenticated-User-Email` is trustworthy; the demo persona switch is showcase-only.

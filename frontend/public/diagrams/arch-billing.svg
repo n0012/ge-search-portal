@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 580" font-family="'Open Sans',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#747474"/>
+    </marker>
+    <style>
+      .t{fill:#222222}.m{fill:#747474}.w{fill:#ffffff}
+      .card{fill:#F7F9FC;stroke:#E5EAF1;stroke-width:1.5}
+      .h{font-weight:700}.flow{stroke:#747474;stroke-width:1.6;fill:none}
+      .no{fill:#B3261E}
+    </style>
+  </defs>
+  <rect width="1040" height="580" fill="#ffffff"/>
+  <text x="40" y="46" font-size="22" class="t h">Licensing &amp; billing — everything AI rides the Gemini Enterprise subscription</text>
+  <text x="40" y="70" font-size="13" class="m">One per-user/month subscription covers search AND grounded Q&amp;A. No per-query search SKU, no per-token Gemini fees — the rest is ordinary infra.</text>
+
+  <!-- subscription -->
+  <rect x="40" y="96" width="300" height="112" rx="12" fill="#0056B3"/>
+  <text x="60" y="122" font-size="13.5" class="w h">Gemini Enterprise subscription</text>
+  <text x="60" y="143" font-size="12" class="w">licenseConfig · per user / month seats</text>
+  <text x="60" y="161" font-size="12" class="w">tier: Search + Assistant</text>
+  <text x="60" y="179" font-size="12" class="w">user store auto-assigns seats on login;</text>
+  <text x="60" y="194" font-size="12" class="w">the app's service account is covered too</text>
+
+  <line x1="340" y1="152" x2="384" y2="152" class="flow" marker-end="url(#arrb)"/>
+  <text x="362" y="142" font-size="11" class="m" text-anchor="middle">covers</text>
+
+  <!-- GE engine -->
+  <rect x="386" y="96" width="330" height="112" rx="12" fill="#0063C3"/>
+  <text x="406" y="122" font-size="13.5" class="w h">GE engine (the app)</text>
+  <rect x="406" y="132" width="290" height="28" rx="8" fill="#ffffff" fill-opacity="0.16"/>
+  <text x="418" y="151" font-size="12" class="w">:search — faceted retrieval, ACL-filtered</text>
+  <rect x="406" y="166" width="290" height="28" rx="8" fill="#ffffff" fill-opacity="0.16"/>
+  <text x="418" y="185" font-size="12" class="w">:streamAssist — grounded Q&amp;A + citations</text>
+
+  <line x1="716" y1="152" x2="760" y2="152" class="flow" marker-end="url(#arrb)"/>
+  <text x="738" y="142" font-size="11" class="m" text-anchor="middle">indexes</text>
+
+  <!-- data store -->
+  <rect x="762" y="96" width="238" height="112" rx="12" fill="#15909C"/>
+  <text x="782" y="122" font-size="13.5" class="w h">VAIS data store</text>
+  <text x="782" y="143" font-size="12" class="w">layout parser · chunking</text>
+  <text x="782" y="161" font-size="12" class="w">hybrid index + acl_groups</text>
+  <text x="782" y="179" font-size="12" class="w">reached ONLY through the</text>
+  <text x="782" y="194" font-size="12" class="w">GE engine, never directly</text>
+
+  <!-- every AI call label -->
+  <line x1="551" y1="208" x2="551" y2="240" class="flow" marker-end="url(#arrb)"/>
+  <rect x="40" y="242" width="960" height="64" rx="12" class="card"/>
+  <text x="60" y="268" font-size="13" class="t h">Every user-facing AI call is subscription-covered</text>
+  <text x="60" y="290" font-size="12.5" class="m">Search results, facets, AI summaries, follow-up Q&amp;A and per-document Q&amp;A all call the GE engine — usage draws on the pooled per-seat plan, not on metered query or token SKUs.</text>
+
+  <!-- avoided paths + the one opt-in metered add-on -->
+  <text x="40" y="340" font-size="13" class="t h">Not used by default (each bills separately) — plus one opt-in add-on</text>
+  <g font-size="12">
+    <rect x="40" y="352" width="306" height="66" rx="10" class="card"/>
+    <text x="58" y="374" class="no h">✕ Data store queried directly</text>
+    <text x="58" y="392" class="m">standalone Vertex AI Search billing</text>
+    <text x="58" y="408" class="m">(SKU 93D6-7280-CF05, per query)</text>
+
+    <rect x="366" y="352" width="306" height="66" rx="10" class="card"/>
+    <text x="384" y="374" class="no h">✕ Direct Vertex Gemini calls</text>
+    <text x="384" y="392" class="m">generateContent bills per token,</text>
+    <text x="384" y="408" class="m">outside the subscription</text>
+
+    <rect x="692" y="352" width="308" height="66" rx="10" fill="#FFF7E6" stroke="#E0A100" stroke-width="1.5"/>
+    <text x="710" y="374" class="t h">△ Ranking API — opt-in (--rerank)</text>
+    <text x="710" y="392" class="m">SKU EE89-3EE8-2541, $1/1,000;</text>
+    <text x="710" y="408" class="m">tracked via billing export</text>
+  </g>
+
+  <!-- infra -->
+  <text x="40" y="452" font-size="13" class="t h">What still bills (ordinary GCP infra — hosting, not AI fees)</text>
+  <g font-size="12">
+    <rect x="40" y="464" width="180" height="46" rx="10" fill="#15909C"/>
+    <text x="130" y="484" text-anchor="middle" class="w h">Cloud Run</text>
+    <text x="130" y="501" text-anchor="middle" class="w">app + jobs</text>
+    <rect x="236" y="464" width="180" height="46" rx="10" fill="#15909C"/>
+    <text x="326" y="484" text-anchor="middle" class="w h">Cloud Storage</text>
+    <text x="326" y="501" text-anchor="middle" class="w">corpus copies</text>
+    <rect x="432" y="464" width="180" height="46" rx="10" fill="#15909C"/>
+    <text x="522" y="484" text-anchor="middle" class="w h">Firestore</text>
+    <text x="522" y="501" text-anchor="middle" class="w">ACL graph</text>
+    <rect x="628" y="464" width="180" height="46" rx="10" fill="#15909C"/>
+    <text x="718" y="484" text-anchor="middle" class="w h">BigQuery</text>
+    <text x="718" y="501" text-anchor="middle" class="w">usage logs</text>
+    <rect x="824" y="464" width="176" height="46" rx="10" fill="#15909C"/>
+    <text x="912" y="484" text-anchor="middle" class="w h">Cloud Build</text>
+    <text x="912" y="501" text-anchor="middle" class="w">deploys</text>
+  </g>
+
+  <!-- footer -->
+  <text x="40" y="546" font-size="12.5" class="m">Verify it: run queries, then Cloud Billing → Reports → group by SKU — expect NO 93D6-7280-CF05 (standalone search) and no Vertex Gemini token SKUs.</text>
+</svg>

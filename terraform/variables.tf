@@ -38,9 +38,16 @@ variable "bucket_name" {
   description = "Corpus bucket name (no gs://). Defaults to <project>-ge-search-corpus."
 }
 
-variable "gemini_model" {
-  type    = string
-  default = "gemini-3.5-flash"
+variable "engine_id" {
+  type        = string
+  default     = "ge-search-app"
+  description = "Gemini Enterprise (Agentspace) app ID (app_type=APP_TYPE_INTRANET) over the data store. The app queries THIS engine's serving config for :search and its assistant for :streamAssist, so all traffic bills through the GE per-seat subscription (querying the data store directly bills standalone, SKU 93D6-7280-CF05). Must be a GE engine."
+}
+
+variable "assistant_id" {
+  type        = string
+  default     = "default_assistant"
+  description = "Assistant ID under the GE engine used for :streamAssist (auto-created with the GE app)."
 }
 
 variable "identity_source" {
@@ -54,18 +61,6 @@ variable "identity_source" {
     condition     = contains(["demo", "iap"], var.identity_source)
     error_message = "identity_source must be \"demo\" or \"iap\"."
   }
-}
-
-variable "multimodal_answers" {
-  type        = string
-  default     = "on"
-  description = "on = Gemini reads retrieved docs' PDF pages (charts/tables) at answer time."
-}
-
-variable "multimodal_model" {
-  type        = string
-  default     = "gemini-3.5-flash"
-  description = "Model for multimodal answers (GA, reads PDFs)."
 }
 
 variable "iap_members" {
@@ -106,4 +101,28 @@ variable "reconcile_schedule" {
   type        = string
   default     = "8,23,38,53 * * * *" # every 15 min, offset off :00 to avoid fleet spikes
   description = "Cron schedule (UTC) for the incremental reconcile job."
+}
+
+variable "enable_billing_export" {
+  type        = bool
+  default     = false
+  description = "Provision a BigQuery dataset (+ billing service-agent grant) for the Cloud Billing per-SKU export. Pointing the billing account at it is a one-time Console step (no API). deploy-all.sh flag: --billing-export."
+}
+
+variable "enable_logging_export" {
+  type        = bool
+  default     = false
+  description = "Create a Cloud Logging sink streaming the app's Cloud Run service/job logs into a partitioned BigQuery dataset. deploy-all.sh flag: --logging-export."
+}
+
+variable "enable_rerank" {
+  type        = bool
+  default     = false
+  description = "Turn on the standalone cross-encoder Ranking API (RERANK=on) for sharper ordering + visible relevance scores. Adds per-search opex outside the GE subscription (SKU 93D6-7280-CF05) — track via the billing export. deploy-all.sh flag: --rerank."
+}
+
+variable "min_instances" {
+  type        = number
+  default     = 0
+  description = "Min warm Cloud Run instances for the app service. 0 = scale to zero (cheapest; cold-starts on deploy/idle). 1 = always warm (no cold-start blips, small always-on cost). deploy-all.sh flag: --warm."
 }

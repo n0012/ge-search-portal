@@ -7,17 +7,23 @@
 #
 # Usage:
 #   bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data]
+#                      [--billing-export] [--logging-export] [--rerank] [--warm]
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data]}"
+PROJECT_ID="${1:?usage: bash deploy-all.sh PROJECT_ID [REGION] [--steps infra,build,data] [--billing-export] [--logging-export] [--rerank] [--warm]}"
 shift || true
 REGION="us-central1"
 STEPS="infra,build,data"
+EXPORT_VARS=()   # optional analytics exports (see terraform/exports.tf)
 while [ $# -gt 0 ]; do
   case "$1" in
-    --steps) STEPS="$2"; shift 2;;
-    *)       REGION="$1"; shift;;
+    --steps)          STEPS="$2"; shift 2;;
+    --billing-export) EXPORT_VARS+=(-var="enable_billing_export=true"); shift;;
+    --logging-export) EXPORT_VARS+=(-var="enable_logging_export=true"); shift;;
+    --rerank)         EXPORT_VARS+=(-var="enable_rerank=true"); shift;;
+    --warm)           EXPORT_VARS+=(-var="min_instances=1"); shift;;
+    *)                REGION="$1"; shift;;
   esac
 done
 has() { case ",${STEPS}," in *",$1,"*) return 0;; *) return 1;; esac; }
@@ -46,7 +52,9 @@ if has infra; then
     fi
   fi
   ( cd terraform
-    terraform init -input=false -backend-config="bucket=${TFSTATE}"
+    # -reconfigure: a reused checkout may still point at ANOTHER project's state bucket
+    # (multi-project installs); this pins the backend to this project without migration.
+    terraform init -input=false -reconfigure -backend-config="bucket=${TFSTATE}"
     # The "(default)" Firestore DB can't be created twice. If the project already has one
     # (e.g. from a prior install or App Engine) and it isn't in state, import it so apply
     # doesn't fail trying to re-create it.
@@ -58,8 +66,19 @@ if has infra; then
           google_firestore_database.default "${PROJECT_ID}/(default)" || true
       fi
     fi
+    # On a BRAND-NEW project the APIs Terraform just enabled (IAM, Run, ...) can lag a
+    # minute behind enablement, 403-ing the first apply mid-run. One retry after a
+    # pause completes cleanly (apply is idempotent).
     terraform apply -auto-approve -input=false \
-      -var="project_id=${PROJECT_ID}" -var="region=${REGION}" ${IAP_VAR[@]+"${IAP_VAR[@]}"} )
+      -var="project_id=${PROJECT_ID}" -var="region=${REGION}" \
+      ${IAP_VAR[@]+"${IAP_VAR[@]}"} ${EXPORT_VARS[@]+"${EXPORT_VARS[@]}"} \
+    || { echo "   first apply hit API-enablement propagation — retrying in 60s"; sleep 60
+         terraform apply -auto-approve -input=false \
+           -var="project_id=${PROJECT_ID}" -var="region=${REGION}" \
+           ${IAP_VAR[@]+"${IAP_VAR[@]}"} ${EXPORT_VARS[@]+"${EXPORT_VARS[@]}"}; } )
+  echo
+  echo "   NOTE: :streamAssist needs an ACTIVE Gemini Enterprise licenseConfig in this"
+  echo "   project. No subscription yet? Run: bash scripts/setup_ge_license.sh ${PROJECT_ID}"
 fi
 
 if has build; then

@@ -35,7 +35,7 @@
     <rect x="60" y="258" width="250" height="38" rx="8" fill="#ffffff"/>
     <text x="74" y="282" class="t h">searches <tspan class="m" font-weight="400">· query · groups · results</tspan></text>
     <rect x="320" y="258" width="260" height="38" rx="8" fill="#ffffff"/>
-    <text x="334" y="282" class="t h">ai_turns <tspan class="m" font-weight="400">· model · web · latency</tspan></text>
+    <text x="334" y="282" class="t h">ai_turns <tspan class="m" font-weight="400">· latency · citations</tspan></text>
     <rect x="60" y="302" width="250" height="38" rx="8" fill="#ffffff"/>
     <text x="74" y="326" class="t h">feedback <tspan class="m" font-weight="400">· document · vote</tspan></text>
     <rect x="320" y="302" width="260" height="38" rx="8" fill="#ffffff"/>
@@ -48,8 +48,8 @@
   <text x="658" y="226" font-size="14" class="t h">Track &amp; optimize</text>
   <g font-size="12" fill="#747474">
     <text x="658" y="250">• Relevance: zero-/low-result &amp; top queries</text>
-    <text x="658" y="270">• AI attach rate, model mix &amp; failover</text>
-    <text x="658" y="290">• Latency p50/p95 · cost · web-search use</text>
+    <text x="658" y="270">• AI attach rate &amp; answer coverage</text>
+    <text x="658" y="290">• Latency p50/p95 · citations per answer</text>
     <text x="658" y="310">• Usage by persona / group</text>
     <text x="658" y="330">• Ingestion health: failures, drift, bytes</text>
   </g>
@@ -77,6 +77,6 @@
   <!-- footer -->
   <rect x="40" y="492" width="960" height="78" rx="12" fill="#F7F9FC" stroke="#E5EAF1" stroke-width="1.5"/>
   <text x="60" y="516" font-size="13" class="t h">Correlate everything by search_id</text>
-  <text x="60" y="536" font-size="12.5" class="m">/api/search mints a search_id; every AI turn and feedback vote echoes it — so you can join an answer (and the model that ran) or a vote back to its search.</text>
-  <text x="60" y="555" font-size="12.5" class="m">Ready-to-run queries live in sql/analytics.sql (AI-usage funnel, model/latency, web-search adoption, feedback funnel, ingestion health).</text>
+  <text x="60" y="536" font-size="12.5" class="m">/api/search mints a search_id; every AI turn and feedback vote echoes it — so you can join an answer or a vote back to its search.</text>
+  <text x="60" y="555" font-size="12.5" class="m">Ready-to-run queries live in sql/analytics.sql (AI-usage funnel, latency, feedback funnel, ingestion health).</text>
 </svg>
