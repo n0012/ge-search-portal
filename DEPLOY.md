@@ -218,6 +218,11 @@ filters via their own `group_users` (so for real use you'd seed your actual user
   Firestore `group_users`. See README → "Identity & access".
 - **Corpus reachability:** the ingest job fetches public docs from the internet; egress is on by
   default on Cloud Run. Counts are best-effort and logged to `ge_search_logs.ingestion_log`.
+- **SEC EDGAR User-Agent:** EDGAR requires a descriptive User-Agent with a real contact and
+  throttles/blocks generic ones — so the default (`contact@example.com`) may return few or no
+  filings. Set `EDGAR_UA` on the ingest job before the data step, e.g.
+  `EDGAR_UA="yourorg-search you@yourorg.com"` (add it to the `ge-search-ingest` job env or pass
+  via the job's environment), then re-run `--steps data`.
 - **Re-installing on the SAME project:** a first install is clean. But if you `terraform destroy`
   and immediately reinstall, the VAIS data store deletes **asynchronously (can take hours)** and
   the same `data_store_id` can't be recreated until it finishes — set a new `data_store_id` in
