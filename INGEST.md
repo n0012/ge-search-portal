@@ -75,6 +75,47 @@ DynamoDB item             ->   catalog record
 So "insert into Firestore" is the universal starting point: a human, a batch job, or the
 Lambda all just upsert a catalog record — and the same idempotent reconcile job loads it.
 
+## Metadata fields & facets — cheap to change, no content re-ingest
+
+Adding or changing metadata (e.g. `year`, `quarter`, `period`, a new facet) **does not
+re-process document content.** Two costs are kept separate:
+
+- **Content processing** — fetch → layout-parse / OCR → chunk → embed. The expensive,
+  one-time part (Amgen's 7.6 TiB / >100M pages). You never want to repeat this.
+- **Metadata (`structData`) indexing** — lightweight, independent of content. This is all
+  a facet/field change touches.
+
+**Rules that keep field changes cheap:**
+
+1. **Declare facet/filter fields in the schema _before_ importing the docs that carry
+   them.** A field is only filterable/facetable for documents indexed *after* it is
+   declared — order matters. The pipeline does this: `03_stage_import.py` patches the
+   schema `fieldConfigs` (`INDEXABLE_ENABLED` + `DYNAMIC_FACETABLE_ENABLED` for
+   `FACET_FIELDS`; `fix_schema.py` adds filter-only `acl_groups`) **immediately before**
+   `documents:import`. So a fresh install gets every facet from the first load — no
+   backfill.
+
+2. **Update metadata _values_ in place** with `documents.patch?updateMask=structData`
+   (`sync_metadata.py`, `fix_titles.py`). This rewrites only `structData` — no
+   re-download, no re-parse, content and embeddings untouched. Steady-state metadata
+   drift (a changed `year`, re-synced `acl_groups`, company rollup) rides this path, and
+   the incremental reconcile job carries metadata deltas the same cheap way.
+
+3. **Adding a _new_ facet to an _existing_ corpus** = declare it (add to `FACET_FIELDS`,
+   or run the schema patch), then **re-index the affected docs so the new field is
+   indexed** — a metadata re-index, still no content re-ingest. `force_reindex.py`
+   re-imports docs in place for this; at Amgen scale, batch it / let the reconcile job
+   roll it out incrementally rather than all at once.
+
+   ⚠️ **Do _not_ purge-and-reimport a large corpus to add a field** — a purge forces a
+   full content re-parse of everything. (That heavy path is only a last-resort repair
+   after manual imports bypassed the declare-before-import step in rule 1.)
+
+**Net for a large corpus:** declare facets up front (rule 1); after that, every field
+change is a `structData` update (rule 2) — you never re-OCR the corpus to add or change a
+facet. Keep `FACET_FIELDS` (in `03_stage_import.py`) in step with the metadata
+`02_make_metadata.py` derives.
+
 ## Components (`scripts/`)
 
 - **`catalog_source.py`** — pluggable source, chosen by `CATALOG_SOURCE`:
