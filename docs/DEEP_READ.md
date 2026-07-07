@@ -58,15 +58,18 @@ combination tried — including the **exact host + version the public docs speci
 | Body | with / without the `name` field | all 404 |
 
 Plain `streamAssist` (grounded answers over the indexed corpus) works on the same engine —
-only the file-context upload is gated. **The public docs' own verbatim snippets fail on
-this engine**, which confirms the gating empirically and independently of the internal
-`ASSISTANT_USER` source: even following the public docs exactly, the method does not exist
-for this project.
+only the file-context upload is gated. **The [public docs'][streamassist-doc] own verbatim
+snippets fail on this engine**, which confirms the gating empirically and independently of
+the internal `ASSISTANT_USER` source: even following the public docs exactly, the method
+does not exist for this project.
 
 Note: the `ASSISTANT_USER` label / allowlist requirement is **not documented publicly** —
-the public streamAssist doc only marks the feature "Preview". The gating is known solely
-from (a) this empirical 404 and (b) internal buganizer references. The practical test for
-any project is simply to call `addContextFile` and see whether it 404s.
+the [public streamAssist doc][streamassist-doc] only marks the feature "Preview". The
+gating is known solely from (a) this empirical 404 and (b) internal buganizer references.
+The practical test for any project is simply to call `addContextFile` and see whether it
+404s.
+
+[streamassist-doc]: https://docs.cloud.google.com/gemini/enterprise/docs/get-answers-from-streamassist
 
 **To unlock:** commercial onboarding to Gemini Enterprise Assistant via the **Google Cloud
 Account Team / Sales Rep** (Cloud Support cannot process the allowlist). This is an
