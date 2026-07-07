@@ -89,31 +89,44 @@ re-process document content.** Two costs are kept separate:
 
 1. **Declare facet/filter fields in the schema _before_ importing the docs that carry
    them.** A field is only filterable/facetable for documents indexed *after* it is
-   declared — order matters. The pipeline does this: `03_stage_import.py` patches the
-   schema `fieldConfigs` (`INDEXABLE_ENABLED` + `DYNAMIC_FACETABLE_ENABLED` for
-   `FACET_FIELDS`; `fix_schema.py` adds filter-only `acl_groups`) **immediately before**
-   `documents:import`. So a fresh install gets every facet from the first load — no
-   backfill.
+   declared — order matters. `03_stage_import.py` does this: it patches the data-store
+   schema's **`jsonSchema`** — setting `indexable` / `dynamicFacetable` / `retrievable`
+   on each `FACET_FIELDS` entry (the `fieldConfigs` request shape is rejected by the v1
+   Schema endpoint, so the config keywords go on the `jsonSchema` itself, same method as
+   `fix_schema.py`, which adds filter-only `acl_groups`) — **immediately before**
+   `documents:import`. So a fresh install gets every facet filterable/facetable from the
+   first load — no backfill.
 
 2. **Update metadata _values_ in place** with `documents.patch?updateMask=structData`
-   (`sync_metadata.py`, `fix_titles.py`). This rewrites only `structData` — no
-   re-download, no re-parse, content and embeddings untouched. Steady-state metadata
-   drift (a changed `year`, re-synced `acl_groups`, company rollup) rides this path, and
-   the incremental reconcile job carries metadata deltas the same cheap way.
+   (`sync_metadata.py`, `fix_titles.py`). This rewrites only `structData` — **verified:
+   the content URI, parsed content, and embeddings are untouched (no re-fetch, no
+   re-parse, no re-embed).** Steady-state metadata drift (a changed `year`, re-synced
+   `acl_groups`, company rollup) rides this path, and the incremental reconcile job
+   carries metadata deltas the same cheap way.
 
-3. **Adding a _new_ facet to an _existing_ corpus** = declare it (add to `FACET_FIELDS`,
-   or run the schema patch), then **re-index the affected docs so the new field is
-   indexed** — a metadata re-index, still no content re-ingest. `force_reindex.py`
-   re-imports docs in place for this; at Amgen scale, batch it / let the reconcile job
-   roll it out incrementally rather than all at once.
+3. **Adding a _new_ filter/facet field to an _already-ingested_ corpus** needs those docs
+   re-indexed once, so the new field enters the filter/facet index (rule 1: a field is
+   only queryable for docs indexed after it's declared). Two paths, cheapest first:
 
-   ⚠️ **Do _not_ purge-and-reimport a large corpus to add a field** — a purge forces a
-   full content re-parse of everything. (That heavy path is only a last-resort repair
-   after manual imports bypassed the declare-before-import step in rule 1.)
+   - **Metadata-only re-index (cheap)** — `documents.patch` per doc
+     (`force_reindex.py --metadata-only`, or `sync_metadata.py` when also setting the
+     value). Rewrites `structData` only: **no re-fetch, no re-parse, no re-embed.** Two
+     honest caveats: the field only becomes queryable after VAIS's background index
+     rebuild converges (can lag by minutes–hours), and a `patch` does not always register
+     a newly-*filterable* field — **verify it actually filters before relying on it.**
+   - **Full re-import (heavy fallback)** — `force_reindex.py` (default) re-imports each
+     doc **with its content**, which **does re-embed** (a real content cost at scale).
+     Use only if the metadata-only path doesn't register the field.
 
-**Net for a large corpus:** declare facets up front (rule 1); after that, every field
-change is a `structData` update (rule 2) — you never re-OCR the corpus to add or change a
-facet. Keep `FACET_FIELDS` (in `03_stage_import.py`) in step with the metadata
+   ⚠️ **Never purge-and-reimport a large corpus to add a field** — a purge forces a full
+   content re-parse + re-embed of everything. (Only used here once as a repair after
+   manual imports bypassed the declare-before-import step in rule 1.)
+
+**Net for a large corpus:** declare facets up front (rule 1) so you never backfill.
+Metadata *value* changes are always cheap `structData` patches (rule 2). Adding a
+brand-new field to an existing corpus needs a one-time re-index — do it metadata-only
+where it registers (rule 3); you never re-OCR/re-embed the corpus unless you fall back to
+a full re-import. Keep `FACET_FIELDS` (in `03_stage_import.py`) in step with the metadata
 `02_make_metadata.py` derives.
 
 ## Components (`scripts/`)

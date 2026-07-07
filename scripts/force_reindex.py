@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
-"""Force VAIS to re-index existing documents so schema/field-config changes take effect.
+"""Re-index existing documents so a newly-declared schema field (a new filter/facet)
+applies to them. A field is only filter/facetable for docs indexed AFTER it is declared,
+so existing docs must be re-indexed once. Two modes — pick by cost:
 
-`documents.patch` updates a field's VALUE but does not always re-run the field-level
-indexing that makes a NEWLY-declared filterable field (e.g. acl_groups) usable in a
-`filter` expression — only `documents:import` reliably does. This lists every document
-and re-imports it in place (reconciliationMode=INCREMENTAL) with its CURRENT structData +
-content, which re-indexes it under the latest schema.
+  --metadata-only  (CHEAP, preferred for pure metadata/facet changes)
+      documents.patch each doc's structData in place. Rewrites structData only — NO
+      re-fetch, NO re-parse, NO re-embed of content. Caveats: the field becomes queryable
+      only after VAIS's background index rebuild converges (can lag minutes–hours), and a
+      patch does not always register a newly-FILTERABLE field. Verify it actually filters;
+      if it never registers, fall back to the default mode.
+
+  (default)        (HEAVY fallback — RE-EMBEDS content)
+      re-import each doc WITH its content (inlineSource, reconciliationMode=INCREMENTAL).
+      Reliably re-indexes under the latest schema, but re-processes + re-embeds content —
+      a real cost at scale. Use only when --metadata-only doesn't register the field.
 
 One-off remediation for an existing data store after fix_schema.py + sync_metadata.py.
-Fresh ingests don't need it (02_make_metadata.py now bakes acl_groups in before import).
+Fresh ingests don't need it — 03_stage_import.py declares FACET_FIELDS (and fix_schema.py
+declares acl_groups) in the schema BEFORE import, so fields index correctly from the
+first load. NEVER purge-and-reimport a large corpus to add a field (that re-parses AND
+re-embeds everything).
 
 Env: PROJECT_ID, LOCATION, DATA_STORE_ID (env or ../.env).
 """
+import argparse
 import os
 import time
 
@@ -66,12 +78,29 @@ def poll(op_name):
         time.sleep(10)
 
 
-def main():
-    docs = list_docs()
+def reindex_metadata_only(docs):
+    """CHEAP: re-write each doc's structData in place via documents.patch. No content
+    re-fetch / re-parse / re-embed. May lag, and may not register a newly-FILTERABLE
+    field — caller must verify it filters."""
+    patched = 0
+    for d in docs:
+        r = SESS.patch(f"https://{HOST}/v1/{d['name']}?updateMask=structData",
+                       headers=HDR, json={"structData": d.get("structData", {})}, timeout=30)
+        if r.status_code == 200:
+            patched += 1
+        else:
+            print(f"  patch failed [{r.status_code}] {d['id']}: {r.text[:160]}")
+    print(f"patched {patched}/{len(docs)} docs (metadata-only — no re-embed).")
+    print("note: the new field becomes queryable only after VAIS's background reindex "
+          "converges. VERIFY it filters; if it never registers, re-run WITHOUT "
+          "--metadata-only (heavier: re-embeds content).")
+
+
+def reimport_with_content(docs):
+    """HEAVY fallback: re-import each doc WITH content — re-embeds. Reliable but costly."""
     records = [{"id": d["id"], "structData": d.get("structData", {}), "content": d["content"]}
                for d in docs if d.get("content", {}).get("uri")]
-    print(f"re-importing {len(records)}/{len(docs)} docs (INCREMENTAL) to re-index…")
-
+    print(f"re-importing {len(records)}/{len(docs)} docs WITH content (re-embeds)…")
     for i in range(0, len(records), 100):                 # inlineSource caps at 100/req
         chunk = records[i:i + 100]
         body = {"inlineSource": {"documents": chunk}, "reconciliationMode": "INCREMENTAL"}
@@ -81,9 +110,17 @@ def main():
         res = poll(r.json()["name"])
         err = (res.get("error") or {}).get("message")
         print(f"  batch {i//100 + 1}: {'ok' if not err else 'ERROR ' + err}")
+    print("done. The new field may take a few more minutes to become queryable.")
 
-    print("done. Re-indexing of the new filterable field may take a few more minutes "
-          "to become queryable.")
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--metadata-only", action="store_true",
+                    help="CHEAP: documents.patch structData in place (no content re-embed). "
+                         "Preferred for metadata/facet changes; verify the field filters.")
+    args = ap.parse_args()
+    docs = list_docs()
+    (reindex_metadata_only if args.metadata_only else reimport_with_content)(docs)
 
 
 if __name__ == "__main__":
