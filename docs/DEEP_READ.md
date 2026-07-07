@@ -45,11 +45,28 @@ restricted behind the internal **`ASSISTANT_USER`** visibility label (applied vi
 Manager). It is **not** available on a plain Vertex AI Search engine.
 
 Verified 2026-07-07 on `losiern-ge-portal1` (a trial `SEARCH_TIER_ENTERPRISE` +
-`SEARCH_ADD_ON_LLM` engine): `addContextFile` returns **404 "Method not found"** across
-`discoveryengine.googleapis.com` **and** `global-discoveryengine.googleapis.com`, `v1` /
-`v1alpha` / `v1beta`, on both the `sessions` and `assistants` resources, with and without
-the `name` body field. Plain `streamAssist` (grounded answers over the indexed corpus)
-works on the same engine — only the file-context upload is gated.
+`SEARCH_ADD_ON_LLM` engine): `addContextFile` returns **404 "Method not found"** on every
+combination tried — including the **exact host + version the public docs specify**
+(`global-discoveryengine.googleapis.com` + `v1`). Axes exhausted:
+
+| Axis | Tried | Result |
+|---|---|---|
+| Host | `discoveryengine.googleapis.com`, `global-discoveryengine.googleapis.com` | all 404 |
+| Version | `v1`, `v1alpha`, `v1beta` | all 404 |
+| Resource | `sessions:addContextFile`, `assistants:addContextFile` | all 404 |
+| Session source | `sessions.create`, `streamAssist` auto-create | all 404 |
+| Body | with / without the `name` field | all 404 |
+
+Plain `streamAssist` (grounded answers over the indexed corpus) works on the same engine —
+only the file-context upload is gated. **The public docs' own verbatim snippets fail on
+this engine**, which confirms the gating empirically and independently of the internal
+`ASSISTANT_USER` source: even following the public docs exactly, the method does not exist
+for this project.
+
+Note: the `ASSISTANT_USER` label / allowlist requirement is **not documented publicly** —
+the public streamAssist doc only marks the feature "Preview". The gating is known solely
+from (a) this empirical 404 and (b) internal buganizer references. The practical test for
+any project is simply to call `addContextFile` and see whether it 404s.
 
 **To unlock:** commercial onboarding to Gemini Enterprise Assistant via the **Google Cloud
 Account Team / Sales Rep** (Cloud Support cannot process the allowlist). This is an
