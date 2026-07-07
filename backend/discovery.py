@@ -37,7 +37,8 @@ FACET_FIELDS = ["company", "report_kind", "research_source", "research_area",
                 "doc_type", "year", "quarter"]
 
 
-def _search(query, page_size, summary=False, filter_="", facet_fields=None, retry_empty=False):
+def _search(query, page_size, summary=False, filter_="", facet_fields=None, retry_empty=False,
+            extractive_segments=None):
     url = f"https://{config.DE_HOST}/v1/{config.SERVING_CONFIG}:search"
     body = {
         "query": query,
@@ -49,9 +50,12 @@ def _search(query, page_size, summary=False, filter_="", facet_fields=None, retr
     }
     # Ask VAIS for extractive segments (longer answer-bearing passages, with adjacent context)
     # so the reranker and grounding prompt get real passages instead of keyword snippets.
-    if config.RERANK_EXTRACTIVE:
+    # `extractive_segments` overrides the count (and forces segments on) — doc-QA needs many
+    # so a passage that answers the question isn't dropped by too small a cap; the default 2
+    # is enough for the reranker, which only needs one representative passage per doc.
+    if extractive_segments or config.RERANK_EXTRACTIVE:
         body["contentSearchSpec"]["extractiveContentSpec"] = {
-            "maxExtractiveSegmentCount": 2,
+            "maxExtractiveSegmentCount": extractive_segments or 2,
             "numPreviousSegments": 1, "numNextSegments": 1,
             "returnExtractiveSegmentScore": True,
         }
@@ -334,19 +338,26 @@ def get_document(document_id):
             "gcsUri": ((j.get("content") or {}).get("uri")) or None}
 
 
-def doc_content(source_url, title, base_filter, max_chars=6000):
+def doc_content(source_url, title, base_filter, max_chars=12000):
     """Retrieve ONE document's answer-bearing passages so doc-QA can ground on content the
     app already has — instead of making the assistant re-find the doc by title (its internal
     search tool is the flap-fragile part). Pins the doc by its unique `source_url` (a
     filterable field) inside the caller's ACL filter, via the hardened search (hedged +
-    empty-retry), and returns concatenated extractive text ('' if unavailable)."""
+    empty-retry), and returns concatenated extractive text ('' if unavailable).
+
+    Requests MANY extractive segments (not the default 2): the answer to a specific question
+    is often in a lower-ranked passage, and a small cap silently drops it — grounding then
+    reports 'no mention' of content that's plainly in the doc. Query by title (a strong
+    lexical match that reliably yields segments); the question steers the assistant, not the
+    retrieval (a bare question can return zero extractive segments)."""
     if not source_url:
         return ""
     su = str(source_url).replace('"', "")
     pin = f'source_url: ANY("{su}")'
     full = f"({base_filter}) AND ({pin})" if base_filter else pin
     try:
-        js = _search(title or "document", 1, filter_=full, retry_empty=True)
+        js = _search(title or "document", 1, filter_=full, retry_empty=True,
+                     extractive_segments=10)
     except Exception as e:
         print("doc_content skipped: %s: %s" % (type(e).__name__, str(e)[:120]), flush=True)
         return ""
