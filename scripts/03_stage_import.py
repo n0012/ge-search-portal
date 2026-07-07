@@ -23,8 +23,12 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CORPUS = os.path.join(ROOT, "corpus")
 METADATA = os.path.join(ROOT, "metadata.jsonl")
 
+# Declared (indexable + facetable) BEFORE the import below — a field is only filterable/
+# facetable for docs indexed AFTER it's declared, so this must precede documents:import.
+# Keep in step with the time metadata 02_make_metadata.py derives (period/month/quarter).
 FACET_FIELDS = ["company", "department", "research_source", "research_area",
-                "doc_type", "report_kind", "year", "quarter", "venue", "publish_date"]
+                "doc_type", "report_kind", "year", "quarter", "period", "month",
+                "venue", "publish_date"]
 
 
 def cfg(key, default=None):
@@ -88,14 +92,39 @@ def main():
     base = (f"https://{host}/v1/projects/{project}/locations/{location}"
             f"/collections/default_collection/dataStores/{ds}")
 
-    # 2. best-effort facet field config (filterable/retrievable/facetable)
-    schema = f"{base}/schemas/default_schema"
-    field_configs = [{"fieldPath": f, "indexableOption": "INDEXABLE_ENABLED",
-                      "retrievableOption": "RETRIEVABLE_ENABLED",
-                      "dynamicFacetableOption": "DYNAMIC_FACETABLE_ENABLED"}
-                     for f in FACET_FIELDS]
-    r = sess.patch(schema, json={"fieldConfigs": field_configs}, timeout=60)
-    print(f"facet field config: [{r.status_code}]")
+    # 2. declare facet fields (indexable => filterable, dynamicFacetable, retrievable)
+    #    in the schema BEFORE import — a field is only filter/facetable for docs indexed
+    #    AFTER it is declared, so this must precede documents:import. The v1 Schema is a
+    #    jsonSchema STRING (the fieldConfigs API shape is rejected here); patch the config
+    #    keywords onto each field, preserving existing props. acl_groups (filter-only) is
+    #    declared separately by fix_schema.py.
+    schema_name = (f"projects/{project}/locations/{location}/collections/"
+                   f"default_collection/dataStores/{ds}/schemas/default_schema")
+    schema_url = f"https://{host}/v1/{schema_name}"
+    facet_kw = {"indexable": True, "searchable": True,
+                "dynamicFacetable": True, "retrievable": True}
+    try:
+        cur = sess.get(schema_url, timeout=60)
+        cur.raise_for_status()
+        js = json.loads(cur.json().get("jsonSchema") or "{}")
+        js.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
+        js.setdefault("type", "object")
+        props = js.setdefault("properties", {})
+        changed = False
+        for f in FACET_FIELDS:
+            existing = props.get(f) or {}
+            want = dict(existing, type=existing.get("type", "string"), **facet_kw)
+            if existing != want:
+                props[f] = want
+                changed = True
+        if changed:
+            p = sess.patch(schema_url, json={"name": schema_name, "jsonSchema": json.dumps(js)},
+                           timeout=60)
+            print(f"declare facet fields: [{p.status_code}]")
+        else:
+            print("declare facet fields: already declared")
+    except Exception as e:                                  # best-effort; never block import
+        print(f"declare facet fields: skipped ({e})")
 
     # 3. import documents from the staged manifest (errors captured to GCS per doc)
     err_prefix = f"import-errors/{shard}"
